@@ -1,0 +1,33 @@
+name: Eval Loop
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: Build Docker Image
+      run: docker build -t simple-rag .
+
+    - name: Run RAG Evaluation
+      env:
+        GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+      run: |
+        docker run --env GROQ_API_KEY=$GROQ_API_KEY \
+                   --env GOOGLE_API_KEY=$GOOGLE_API_KEY \
+                   -v ${{ github.workspace }}/baseline:/app/baseline \
+                   simple-rag \
+                   python -m src.app evaluate
+
+    - name: Publish Evaluation Summary
+      if: always()
+      run: cat baseline/summary.md >> $GITHUB_STEP_SUMMARY

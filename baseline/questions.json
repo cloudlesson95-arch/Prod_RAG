@@ -1,0 +1,82 @@
+[
+  {
+    "id": 1,
+    "source_doc": "fictional_text.txt",
+    "query": "How many people visited the Oakhaven Pumpkin Festival in 2025?",
+    "expected_context": "In 2025, the festival drew 14,250 visitors over three days in October.",
+    "expected_answer": "14,250 visitors.",
+    "is_adversarial": false
+  },
+  {
+    "id": 2,
+    "source_doc": "fictional_text.txt",
+    "query": "What was the city council's vote count on the parking garage proposal?",
+    "expected_context": "the city council voted 5 to 2 on November 12 to build a new multi-level garage near Maple Street.",
+    "expected_answer": "5 to 2 in favor.",
+    "is_adversarial": false
+  },
+  {
+    "id": 3,
+    "source_doc": "fictional_text.txt",
+    "query": "What is the combined total of the downtown improvement budget and the parking garage construction cost?",
+    "expected_context": "a new city budget of $2.4 million for downtown improvements + will cost $850,000.",
+    "expected_answer": "$3.25 million (2.4M + 850K)",
+    "is_adversarial": true
+  },
+  {
+    "id": 4,
+    "source_doc": "cat-facts.txt",
+    "query": "What is a group of cats called?",
+    "expected_context": "A group of cats is called a 'clowder.'",
+    "expected_answer": "A clowder.",
+    "is_adversarial": false
+  },
+  {
+    "id": 5,
+    "source_doc": "cat-facts.txt",
+    "query": "What is the top speed a cat can run?",
+    "expected_context": "A cat can travel at a top speed of approximately 31 mph (49 km) over a short distance.",
+    "expected_answer": "About 31 mph (49 km/h).",
+    "is_adversarial": false
+  },
+  {
+    "id": 6,
+    "source_doc": "cat-facts.txt",
+    "query": "How many domestic cats are there in North America specifically, not worldwide?",
+    "expected_context": "Cats are North America's most popular pets: there are 73 million cats compared to 63 million dogs.",
+    "expected_answer": "73 million",
+    "is_adversarial": true
+  },
+  {
+    "id": 7,
+    "source_doc": "pydantic_llms-full.txt",
+    "query": "What is the default token_threshold for AnthropicCompaction, and what's the minimum allowed value?",
+    "expected_context": "token_threshold: int, Default: 150000 — Compact when input tokens exceed this threshold. Minimum 50,000.",
+    "expected_answer": "Default 150,000; minimum allowed is 50,000.",
+    "is_adversarial": false
+  },
+  {
+    "id": 8,
+    "source_doc": "pydantic_llms-full.txt",
+    "query": "What does ALLOW_MODEL_REQUESTS default to?",
+    "expected_context": "ALLOW_MODEL_REQUESTS ... Default: True",
+    "expected_answer": "True.",
+    "is_adversarial": false
+  },
+  {
+    "id": 9,
+    "source_doc": "pydantic_llms-full.txt",
+    "query": "What does anthropic_cache_messages do, and how is that different from anthropic_cache?",
+    "expected_context": "anthropic_cache_messages — This is an alternative to anthropic_cache for Anthropic-compatible gateways and proxies that accept the Anthropic message format but don't support the top-level automatic caching parameter... Cannot be combined with anthropic_cache. vs. anthropic_cache — Enable prompt caching for multi-turn conversations. Passes a top-level cache_control parameter...",
+    "expected_answer": "anthropic_cache_messages adds cache_control to the last message block specifically, as a gateway/proxy-compatible alternative to the top-level anthropic_cache setting — the two are mutually exclusive.",
+    "is_adversarial": true
+  },
+  {
+    "id": 10,
+    "source_doc": "general",
+    "query": "What is 2345 * 849?",
+    "expected_context": "2345 × 849 = 1,990,905",
+    "expected_answer": "1,990,905",
+    "is_adversarial": false
+  }
+]

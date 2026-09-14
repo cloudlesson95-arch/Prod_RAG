@@ -1,0 +1,90 @@
+{
+  "name": "My workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "rag-query",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "2195a298-da49-4971-bcbe-d99f51abc4eb",
+      "name": "Webhook",
+      "webhookId": "da37e493-6e63-4ee0-9df0-d19c14075afb"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://rag-api:8000/query",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"question\": \"={{ $json.body.question }}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        224,
+        0
+      ],
+      "id": "81d3d4ce-e3ff-42df-b4b0-1262a5df2cbe",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        448,
+        0
+      ],
+      "id": "07c5983b-e080-44c3-8237-b2a3e4f5012a",
+      "name": "Respond to Webhook"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "ce8503b3-cc58-4a10-a774-a40036561096",
+  "meta": {
+    "instanceId": "72fe24bde3a0b268ccfa18f14e7eeb7a73e97c7369c79ace1fe808ad9df206e1"
+  },
+  "nodeGroups": [],
+  "id": "lRk3DItbKAI45W9c",
+  "tags": []
+}

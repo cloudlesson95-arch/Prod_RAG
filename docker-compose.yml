@@ -1,0 +1,24 @@
+version: '3.8'
+services:
+  rag-api:
+    build: .
+    container_name: simple_rag_api
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    command: python -m src.app serve --host 0.0.0.0 --port 8000
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:latest
+    container_name: simple_rag_n8n
+    ports:
+      - "5678:5678"
+    environment:
+      - N8N_BASIC_AUTH_ACTIVE=false
+      - N8N_HOST=localhost
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+    volumes:
+      - n8n_data:/home/node/.n8n
+volumes:
+  n8n_data:
