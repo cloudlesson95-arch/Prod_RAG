@@ -8,6 +8,7 @@ from src.config import MAIN_LLM_MODEL
 from src.core.utils import create_llm
 from src.core.vectorstore import create_or_get_vectorstore
 from src.core.rag_agent import setup_router, answer_question
+from src.core.mcp_server import mcp
 
 load_dotenv()
 logger = setup_logging(__name__)
@@ -17,6 +18,8 @@ app = FastAPI(
     description = "REST API for Simple RAG pipeline integrated with N8N",
     version = "1.0.0"
 )
+
+app.mount("/mcp", mcp.streamable_http_app())
 
 router = None
 vectorstore = None
