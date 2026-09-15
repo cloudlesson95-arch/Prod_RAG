@@ -1,5 +1,6 @@
 import os
 from src.routing.model_resolver import get_model
+from src.secrets import get_secret
 
 def create_llm(provider: str):
     """Factory function to create LLM instances based on the provider name.
@@ -20,14 +21,14 @@ def create_llm(provider: str):
         return ChatGoogleGenerativeAI(
             model = model,
             temperature=0,
-            google_api_key=os.getenv("GOOGLE_API_KEY")
+            google_api_key=get_secret("GOOGLE_API_KEY")
         )
     elif provider == "groq":
         from langchain_groq import ChatGroq
         return ChatGroq(
             model = model,
             temperature=0,
-            groq_api_key = os.getenv("GROQ_API_KEY")
+            groq_api_key=get_secret("GROQ_API_KEY")
         )
     else:
         raise ValueError(f"Unknown provider: {provider}")

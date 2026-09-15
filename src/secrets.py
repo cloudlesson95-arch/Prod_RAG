@@ -1,0 +1,108 @@
+import abc
+import os
+import keyring
+from src.logging_config import setup_logging
+
+logger = setup_logging(__name__)
+
+
+class SecretProvider(abc.ABC):
+    """Abstract base class for secret provider implementations."""
+
+    @abc.abstractmethod
+    def get(self, name: str) -> str | None:
+        """Retrieve a secret by name.
+
+        Args:
+            name: The secret identifier (e.g. 'GROQ_API_KEY').
+
+        Returns:
+            str | None: The secret string value if found, else None.
+        """
+        pass
+
+
+class KeyringSecretProvider(SecretProvider):
+    """Fetches secrets from the local OS Keychain / Credential Manager."""
+
+    def __init__(self, service_name: str | None = None):
+        self.service_name = service_name or "agentic-rag-platform"
+
+    def get(self, name: str) -> str | None:
+        try:
+            val = keyring.get_password(self.service_name, name)
+            return val
+        except Exception as e:
+            logger.warning(f"[SecretProvider] Failed to read '{name}' from keyring: {e}")
+            return None
+
+
+class EnvSecretProvider(SecretProvider):
+    """Fetches secrets from environment variables (fallback)."""
+
+    def get(self, name: str) -> str | None:
+        return os.getenv(name)
+
+
+class CompositeSecretProvider(SecretProvider):
+    """Tries primary provider first, then falls back to secondary provider."""
+
+    def __init__(self, primary: SecretProvider, fallback: SecretProvider):
+        self.primary = primary
+        self.fallback = fallback
+
+    def get(self, name: str) -> str | None:
+        val = self.primary.get(name)
+        if val is not None and val != "":
+            return val
+        return self.fallback.get(name)
+
+
+_secret_provider_instance: SecretProvider | None = None
+
+
+def get_secret_provider() -> SecretProvider:
+    """Return singleton instance of configured SecretProvider strategy."""
+    global _secret_provider_instance
+    if _secret_provider_instance is None:
+        try:
+            from src.config import SECRET_BACKEND, KEYRING_SERVICE_NAME
+            backend = SECRET_BACKEND.lower()
+            service_name = KEYRING_SERVICE_NAME
+        except (ImportError, AttributeError):
+            backend = os.getenv("SECRET_BACKEND", "keyring").lower()
+            service_name = os.getenv("KEYRING_SERVICE_NAME", "agentic-rag-platform")
+
+        if backend == "keyring":
+            _secret_provider_instance = CompositeSecretProvider(
+                primary=KeyringSecretProvider(service_name=service_name),
+                fallback=EnvSecretProvider(),
+            )
+        elif backend == "env":
+            _secret_provider_instance = EnvSecretProvider()
+        else:
+            logger.warning(
+                f"[SecretProvider] Unknown SECRET_BACKEND '{backend}', defaulting to Composite(keyring -> env)"
+            )
+            _secret_provider_instance = CompositeSecretProvider(
+                primary=KeyringSecretProvider(service_name=service_name),
+                fallback=EnvSecretProvider(),
+            )
+    return _secret_provider_instance
+
+
+def get_secret(name: str, default: str | None = None) -> str | None:
+    """Retrieve secret by name using the configured strategy.
+
+    Args:
+        name: Name of secret (e.g. 'GROQ_API_KEY').
+        default: Optional default value if secret is not set anywhere.
+
+    Returns:
+        str | None: Secret value or default.
+    """
+    provider = get_secret_provider()
+    val = provider.get(name)
+    if val is not None:
+        return val
+    return default

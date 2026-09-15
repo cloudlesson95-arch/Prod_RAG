@@ -30,6 +30,13 @@ def main():
 
     history_parser = subparsers.add_parser("history", help="View past evaluation runs")
     history_parser.add_argument("--limit", type=int, default=10, help="Number of past runs to display")
+
+    # Secret management commands
+    set_secret_parser = subparsers.add_parser("set-secret", help="Set a secret in the OS keyring")
+    set_secret_parser.add_argument("name", help="Secret name (e.g. GROQ_API_KEY)")
+    set_secret_parser.add_argument("value", nargs="?", default=None, help="Secret value")
+    get_secret_parser = subparsers.add_parser("get-secret", help="Get a secret from keyring / env")
+    get_secret_parser.add_argument("name", help="Secret name (e.g. GROQ_API_KEY)")
     
     args = parser.parse_args() 
 
@@ -80,7 +87,24 @@ def main():
                 score = f"{run['precision_score']:.1f}%"
                 passed = "YES" if run['passed_threshold'] else "NO"
                 print(f"{run['id']:<4} {ts:<25} {run['main_model']:<20} {run['routing_method']:<10} {score:<8} {passed:<6}")    
-            
+
+    elif args.command == "set-secret":
+        import keyring
+        import getpass
+        from src.config import KEYRING_SERVICE_NAME
+        val = args.value or getpass.getpass(f"Enter secret value for '{args.name}': ") # to hide raw value
+        keyring.set_password(KEYRING_SERVICE_NAME, args.name, val)
+        logger.info(f"Secret '{args.name}' set successfully in OS Keyring ('{KEYRING_SERVICE_NAME}').")
+
+    elif args.command == "get-secret":
+        from src.secrets import get_secret
+        val = get_secret(args.name)
+        if val is not None:
+            masked = val[:4] + "..." + val[-4:] if len(val) > 8 else "***"
+            print(f"{args.name}: {masked}")
+        else:
+            print(f"Secret '{args.name}' not found.")
+ 
     else:
         parser.print_help()
 

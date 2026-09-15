@@ -2,6 +2,7 @@ import os
 import requests
 from src.config import PREFERRED_MODELS
 from src.logging_config import setup_logging
+from src.secrets import get_secret
 import re
 
 logger = setup_logging(__name__)
@@ -43,7 +44,7 @@ def _fetch_available_models(provider: str) -> list[str]:
         requests.RequestException: If the API call fails.
     """
     if provider == "groq":
-        api_key = os.getenv("GROQ_API_KEY")
+        api_key = get_secret("GROQ_API_KEY")
         resp = requests.get(
             "https://api.groq.com/openai/v1/models",
             headers = {"Authorization": f"Bearer {api_key}"},
@@ -52,7 +53,7 @@ def _fetch_available_models(provider: str) -> list[str]:
         resp.raise_for_status()
         return [m["id"] for m in resp.json()["data"]]
     if provider == "gemini":
-        api_key = os.getenv("GOOGLE_API_KEY")
+        api_key = get_secret("GOOGLE_API_KEY")
         resp = requests.get(
             "https://generativelanguage.googleapis.com/v1beta/models",
             headers={"x-goog-api-key": api_key},
@@ -79,7 +80,7 @@ def _probe_model(provider: str, model_id: str) -> bool:
     """
     try:
         if provider == "groq":
-            api_key = os.getenv("GROQ_API_KEY")
+            api_key = get_secret("GROQ_API_KEY")
             resp = requests.post(
                 "https://api.groq.com/openai/v1/chat/completions",
                 headers={"Authorization": f"Bearer {api_key}"},
@@ -93,7 +94,7 @@ def _probe_model(provider: str, model_id: str) -> bool:
             resp.raise_for_status()
             return True
         elif provider == "gemini":
-            api_key = os.getenv("GOOGLE_API_KEY")
+            api_key = get_secret("GOOGLE_API_KEY")
             resp = requests.post(
                 f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent",
                 headers={"x-goog-api-key": api_key},

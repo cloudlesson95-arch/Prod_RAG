@@ -65,3 +65,7 @@ RERANKER_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 # Multi-Hop Agent configuration
 ENABLE_MULTI_HOP = True
 MAX_HOPS = 2
+
+# Secret Provider configuration
+SECRET_BACKEND = os.getenv("SECRET_BACKEND", "keyring")  # "keyring", "env"
+KEYRING_SERVICE_NAME = os.getenv("KEYRING_SERVICE_NAME", "agentic-rag-platform")
