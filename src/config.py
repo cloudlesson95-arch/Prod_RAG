@@ -20,9 +20,10 @@ MAIN_LLM_MODEL = "groq" # or gemini
 EVAL_LLM_MODEL = "groq" # or gemini
 
 # Database & Runtime Storage paths
-LOCAL_DIR = ".local"
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+LOCAL_DIR = os.path.join(BASE_DIR, ".local")
 CHROMA_PERSIST_DIR = os.path.join(LOCAL_DIR, "chroma_db")
-DATA_DIR = "data"
+DATA_DIR = os.path.join(BASE_DIR, "data")
 
 # Logging configuration
 LOG_LEVEL = "INFO"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
