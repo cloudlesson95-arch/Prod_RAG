@@ -65,16 +65,21 @@ def retrieve_chunks(query: str, source_filter: str, vectorstore):
 
     return results
 
-def retrieve_and_answer(query: str, source_filter: str, vectorstore, answer_llm) -> str:
-    """Retrieve relevant chunks and call answer LLM (supporting Multi-Hop if enabled)."""
+def retrieve_and_answer(query: str, source_filter: str, vectorstore, answer_llm) -> tuple[str, str]:
+    """Retrieve relevant chunks and call answer LLM (supporting Multi-Hop if enabled).
+    
+    Returns:
+        tuple[str, str]: (answer_text, context_text)
+    """
     if ENABLE_MULTI_HOP:
-        return execute_multi_hop_pipeline(
+        ans = execute_multi_hop_pipeline(
             question=query,
             initial_source=source_filter,
             vectorstore=vectorstore,
             answer_llm=answer_llm,
             retrieve_fn=lambda q, s: retrieve_chunks(q, s, vectorstore),
         )
+        return ans, ""
 
     results = retrieve_chunks(query, source_filter, vectorstore)
     context_text = "\n---\n".join([doc.page_content for doc in results])
@@ -88,7 +93,8 @@ def retrieve_and_answer(query: str, source_filter: str, vectorstore, answer_llm)
 
     Question: {query}
     Answer:"""
-    return answer_llm.invoke(prompt).content
+    return answer_llm.invoke(prompt).content, context_text
+
 
 def answer_question(question: str, router, vectorstore, answer_llm, max_retries: int = MAX_RETRIES) -> str:
     """Answer a user question using RAG with self-correction.
@@ -112,14 +118,17 @@ def answer_question(question: str, router, vectorstore, answer_llm, max_retries:
         logger.info(f"[Semantic Cache]: MISS (highest similarity {sim:.3f})")
 
     source_filter = "none"
+    context_text = ""
+
     if ROUTING_METHOD == "classical":
-        from src.routing.classifier import predict_needs_retrieval
+        from src.routing.classifier import predict_needs_retrieval_with_confidence
         from src.routing.clustering import predict_source
 
         query_embedding = vectorstore._embedding_function.embed_query(question)
 
         # Decision Point 1: Needs retrieval? (classifier)
-        needs_retrieval = predict_needs_retrieval(query_embedding)
+        needs_retrieval, confidence = predict_needs_retrieval_with_confidence(query_embedding)
+        logger.info(f"[Classical Router]: Retrieval decision={needs_retrieval} (Confidence: {confidence:.2f})")
         if not needs_retrieval:
             logger.info("[Classical Router]: No retrieval needed (Logistic Regression)")
             answer = answer_llm.invoke(question).content
@@ -127,7 +136,7 @@ def answer_question(question: str, router, vectorstore, answer_llm, max_retries:
             # Decision Point 2: Nearest source centroid (clustering)
             source_filter = predict_source(query_embedding)
             logger.info(f"[Classical Router]: Selected source '{source_filter}' (Nearest Centroid)")
-            answer = retrieve_and_answer(question, source_filter, vectorstore, answer_llm)
+            answer, context_text = retrieve_and_answer(question, source_filter, vectorstore, answer_llm)
 
     else: # Default: "llm"
         decision = router.invoke(question)
@@ -137,7 +146,8 @@ def answer_question(question: str, router, vectorstore, answer_llm, max_retries:
             logger.info("[Router] No retrieval needed")
             answer = answer_llm.invoke(question).content
         else:
-            answer = retrieve_and_answer(question, decision.source, vectorstore, answer_llm)
+            source_filter = decision.source
+            answer, context_text = retrieve_and_answer(question, source_filter, vectorstore, answer_llm)
 
     current_query = question
     # Self-Correction loop
@@ -154,7 +164,21 @@ def answer_question(question: str, router, vectorstore, answer_llm, max_retries:
             current_query = answer_llm.invoke(rephrase_prompt).content.strip()
             logger.info(f"[Agent] Rephrased query: '{current_query}'")
 
-            answer = retrieve_and_answer(current_query, source_filter, vectorstore, answer_llm)
+            answer, context_text = retrieve_and_answer(current_query, source_filter, vectorstore, answer_llm)
+
+    # Groundedness Check
+    if source_filter != "none" and "I don't know" not in answer and context_text:
+        from src.monitoring.groundedness import score_groundedness
+        from src.config import GROUNDEDNESS_THRESHOLD
+
+        answer_emb = vectorstore._embedding_function.embed_query(answer)
+        context_emb = vectorstore._embedding_function.embed_query(context_text)
+        g_score = score_groundedness(answer_emb, context_emb)
+
+        if g_score < GROUNDEDNESS_THRESHOLD:
+            logger.warning(f"[Groundedness]: Low score {g_score:.3f} (threshold {GROUNDEDNESS_THRESHOLD:.2f})")
+        else:
+            logger.info(f"[Groundedness]: Score: {g_score:.3f}")
 
     if ENABLE_SEMANTIC_CACHE:
         if "I don't know" in answer:

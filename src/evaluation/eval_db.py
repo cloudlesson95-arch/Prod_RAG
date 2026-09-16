@@ -20,10 +20,12 @@ def init_db(conn: sqlite3.Connection) -> None:
             precision_score REAL NOT NULL,
             total_questions INTEGER NOT NULL,
             successful_questions INTEGER NOT NULL,
-            passed_threshold BOOLEAN NOT NULL
+            passed_threshold BOOLEAN NOT NULL,
+            run_type TEXT DEFAULT 'offline',
+            revision TEXT
         )
     """)
-    
+
     # Table 2: Detailed per-question results for each run
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS eval_results (
@@ -38,7 +40,6 @@ def init_db(conn: sqlite3.Connection) -> None:
     """)
     conn.commit()
 
-
 def save_eval_run(
     db_path: str,
     main_model: str,
@@ -49,7 +50,9 @@ def save_eval_run(
     total_questions: int,
     successful_questions: int,
     passed_threshold: bool,
-    question_results: List[Dict[str, Any]]
+    question_results: List[Dict[str, Any]],
+    run_type: str = "offline",
+    revision: str | None = None,
 ) -> int:
     """Save evaluation metrics and results using a single connection & transaction."""
     db_dir = os.path.dirname(db_path)
@@ -65,15 +68,17 @@ def save_eval_run(
         cursor.execute("""
             INSERT INTO eval_runs (
                 timestamp, main_model, eval_model, routing_method, k_retrieval,
-                precision_score, total_questions, successful_questions, passed_threshold
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                precision_score, total_questions, successful_questions, passed_threshold,
+                run_type, revision
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             now_utc, main_model, eval_model, routing_method, k_retrieval,
-            precision_score, total_questions, successful_questions, passed_threshold
+            precision_score, total_questions, successful_questions, passed_threshold,
+            run_type, revision
         ))
         
         run_id = cursor.lastrowid
-        
+
         # Batch insert all per-question results in a single call
         results_data = [
             (run_id, q.get("id"), q["query"], q["passed"], q.get("llm_answer"))
@@ -88,7 +93,6 @@ def save_eval_run(
         conn.commit()
         return run_id
 
-
 def get_eval_history(db_path: str, limit: int = 10) -> List[Dict[str, Any]]:
     """Retrieve recent evaluation runs for CLI output using a single connection."""
     db_dir = os.path.dirname(db_path)
@@ -101,7 +105,8 @@ def get_eval_history(db_path: str, limit: int = 10) -> List[Dict[str, Any]]:
         
         cursor.execute("""
             SELECT id, timestamp, main_model, routing_method, k_retrieval,
-                   precision_score, successful_questions, total_questions, passed_threshold
+                   precision_score, successful_questions, total_questions, passed_threshold,
+                   run_type, revision
             FROM eval_runs
             ORDER BY id DESC
             LIMIT ?

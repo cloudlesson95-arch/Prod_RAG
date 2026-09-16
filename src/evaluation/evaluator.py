@@ -28,6 +28,28 @@ def load_questions(filepath: str) -> list[dict]:
     with open(filepath, "r", encoding="utf-8") as f:
         return json.load(f)
 
+def judge_answer(query: str, expected_answer: str, actual_answer: str, judge_llm) -> bool:
+    """Evaluate an actual answer against a ground truth reference answer using an LLM judge.
+    
+    Returns:
+        bool: True if LLM confirms factual agreement, False otherwise.
+    """
+    judge_prompt = f"""You are an impartial judge evaluating an AI search engine response against ground truth reference answers.
+
+User Question: {query}
+Reference Ground Truth Answer: {expected_answer}
+Generated Model Answer: {actual_answer}
+
+Does the Generated Model Answer factually agree with the Reference Ground Truth Answer?
+- Answer YES if the core facts match the reference answer.
+- Answer NO if the generated answer is factually wrong, contradicts the reference answer, or says "I don't know".
+
+Reply ONLY with "YES" or "NO". Do not explain."""
+
+    response = judge_llm.invoke(judge_prompt)
+    decision = response.content.strip().upper()
+    return "YES" in decision
+
 def run_evaluation():
     logger.info("Loading vector database")
     vectorstore = create_or_get_vectorstore()
@@ -49,21 +71,7 @@ def run_evaluation():
             logger.info(f"\tThe user asked: {q['query']}")
             logger.info(f"\tLLM answer: {answer}")            
 
-            judge_prompt = f"""You are an impartial judge evaluating an AI search engine response against ground truth reference answers.
-
-User Question: {q['query']}
-Reference Ground Truth Answer: {q['expected_answer']}
-Generated Model Answer: {answer}
-
-Does the Generated Model Answer factually agree with the Reference Ground Truth Answer?
-- Answer YES if the core facts match the reference answer.
-- Answer NO if the generated answer is factually wrong, contradicts the reference answer, or says "I don't know".
-
-Reply ONLY with "YES" or "NO". Do not explain."""
-
-            response = judge_llm.invoke(judge_prompt)
-            decision = response.content.strip().upper()
-            is_passed = "YES" in decision
+            is_passed = judge_answer(q['query'], q['expected_answer'], answer, judge_llm)
 
             question_results.append({
                 "id": q.get("id"),

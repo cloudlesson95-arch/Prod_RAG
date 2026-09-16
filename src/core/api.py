@@ -9,9 +9,12 @@ from src.core.utils import create_llm
 from src.core.vectorstore import create_or_get_vectorstore
 from src.core.rag_agent import setup_router, answer_question
 from src.core.mcp_server import mcp
+from src.monitoring.telemetry import configure_telemetry
 
 load_dotenv()
 logger = setup_logging(__name__)
+
+configure_telemetry()
 
 app = FastAPI(
     title = "Simple RAG API",

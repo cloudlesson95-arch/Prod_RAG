@@ -37,7 +37,12 @@ def main():
     set_secret_parser.add_argument("value", nargs="?", default=None, help="Secret value")
     get_secret_parser = subparsers.add_parser("get-secret", help="Get a secret from keyring / env")
     get_secret_parser.add_argument("name", help="Secret name (e.g. GROQ_API_KEY)")
-    
+        
+    # Live evaluation command
+    live_eval_parser = subparsers.add_parser("live-eval", help="Run evaluation against a live deployment")
+    live_eval_parser.add_argument("--target-url", required=True, help="Target API URL (e.g. http://localhost:8000)")
+    live_eval_parser.add_argument("--revision", default=None, help="Git SHA or release tag")
+
     args = parser.parse_args() 
 
     if args.command == "index":
@@ -80,13 +85,15 @@ def main():
             print("No evaluation runs found in history.")
         else:
             print(f"\n--- Last {len(history)} Evaluation Runs ---")
-            print(f"{'ID':<4} {'Timestamp':<25} {'Model':<20} {'Routing':<10} {'Score':<8} {'Passed':<6}")
-            print("-" * 78)
+            print(f"{'ID':<4} {'Timestamp':<20} {'Type':<8} {'Model':<16} {'Score':<8} {'Passed':<6} {'Revision':<10}")
+            print("-" * 80)
             for run in history:
                 ts = run['timestamp'][:19].replace('T', ' ')
                 score = f"{run['precision_score']:.1f}%"
                 passed = "YES" if run['passed_threshold'] else "NO"
-                print(f"{run['id']:<4} {ts:<25} {run['main_model']:<20} {run['routing_method']:<10} {score:<8} {passed:<6}")    
+                run_type = run.get('run_type') or 'offline'
+                rev = run.get('revision') or '-'
+                print(f"{run['id']:<4} {ts:<20} {run_type:<8} {run['main_model']:<16} {score:<8} {passed:<6} {rev:<10}")   
 
     elif args.command == "set-secret":
         import keyring
@@ -105,6 +112,15 @@ def main():
         else:
             print(f"Secret '{args.name}' not found.")
  
+    elif args.command == "live-eval":
+        import sys
+        from src.evaluation.live_evaluator import run_live_evaluation
+        run_id, precision, passed = run_live_evaluation(args.target_url, args.revision)
+        if not passed:
+            sys.exit(1)
+        else:
+            sys.exit(0)
+            
     else:
         parser.print_help()
 

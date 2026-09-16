@@ -69,3 +69,9 @@ MAX_HOPS = 2
 # Secret Provider configuration
 SECRET_BACKEND = os.getenv("SECRET_BACKEND", "keyring")  # "keyring", "env"
 KEYRING_SERVICE_NAME = os.getenv("KEYRING_SERVICE_NAME", "agentic-rag-platform")
+
+# Groundedness Check threshold
+GROUNDEDNESS_THRESHOLD = float(os.getenv("GROUNDEDNESS_THRESHOLD", "0.5"))
+
+# Azure Application Insights Telemetry
+APPLICATIONINSIGHTS_CONNECTION_STRING = os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING", "")

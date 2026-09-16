@@ -75,3 +75,24 @@ def predict_needs_retrieval(query_embedding) -> bool:
     classifier = joblib.load(CLASSIFIER_MODEL_PATH)
     prediction = classifier.predict([query_embedding])[0]
     return bool(prediction == 1)
+
+def predict_needs_retrieval_with_confidence(query_embedding) -> tuple[bool, float]:
+    """Predict whether a query needs retrieval along with raw classifier confidence.
+    
+    Args:
+        query_embedding: Vector embedding of the input query.
+        
+    Returns:
+        tuple: (needs_retrieval: bool, confidence: float)
+            - confidence is the raw logistic probability of the predicted class [0.0, 1.0].
+              Note: This is an uncalibrated logistic score, not a guaranteed probability.
+    """
+    if not os.path.exists(CLASSIFIER_MODEL_PATH):
+        raise FileNotFoundError("Classifier model not found. Run training first.")
+
+    classifier = joblib.load(CLASSIFIER_MODEL_PATH)
+    prediction = classifier.predict([query_embedding])[0]
+    probabilities = classifier.predict_proba([query_embedding])[0]
+    confidence = float(probabilities[prediction])
+
+    return bool(prediction == 1), confidence
