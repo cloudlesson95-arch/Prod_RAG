@@ -9,3 +9,4 @@ logs/
 *.log
 *.db
 baseline/summary.md
+infra/azure/main.json

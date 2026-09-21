@@ -75,3 +75,6 @@ GROUNDEDNESS_THRESHOLD = float(os.getenv("GROUNDEDNESS_THRESHOLD", "0.5"))
 
 # Azure Application Insights Telemetry
 APPLICATIONINSIGHTS_CONNECTION_STRING = os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING", "")
+
+# Azure Key Vault configuration
+AZURE_KEYVAULT_URL = os.getenv("AZURE_KEYVAULT_URL", "")

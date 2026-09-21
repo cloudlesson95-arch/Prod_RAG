@@ -1,0 +1,95 @@
+name: Deploy to Azure
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  id-token: write   # Required for Azure OIDC authentication
+  contents: read
+
+jobs:
+  build-and-push:
+    name: Build & Push Image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Log in to Azure (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Log in to ACR
+        run: az acr login --name ${{ vars.ACR_NAME }}
+
+      - name: Build & Push Docker Image
+        run: |
+          IMAGE_URI="${{ vars.ACR_NAME }}.azurecr.io/rag-api:${{ github.sha }}"
+          IMAGE_LATEST="${{ vars.ACR_NAME }}.azurecr.io/rag-api:latest"
+          
+          docker build -t $IMAGE_URI -t $IMAGE_LATEST .
+          docker push $IMAGE_URI
+          docker push $IMAGE_LATEST
+
+  deploy:
+    name: Deploy to Container Apps
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Log in to Azure (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Configure Registry & Update Container App
+        run: |
+          # Fetch Managed Identity resource ID
+          IDENTITY_ID=$(az identity list --resource-group ${{ vars.RESOURCE_GROUP }} --query "[0].id" -o tsv)
+          
+          # Link ACR registry authentication using Managed Identity
+          az containerapp registry set \
+            --name ${{ vars.CONTAINER_APP_NAME }} \
+            --resource-group ${{ vars.RESOURCE_GROUP }} \
+            --server "${{ vars.ACR_NAME }}.azurecr.io" \
+            --identity "$IDENTITY_ID"
+            
+          # Deploy newly pushed container image
+          az containerapp update \
+            --name ${{ vars.CONTAINER_APP_NAME }} \
+            --resource-group ${{ vars.RESOURCE_GROUP }} \
+            --image "${{ vars.ACR_NAME }}.azurecr.io/rag-api:${{ github.sha }}"
+
+  post-deploy-gate:
+    name: Live Evaluation Gate
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run Live Evaluation Gate
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          SECRET_BACKEND: env
+        run: |
+          python -m src.app live-eval \
+            --target-url ${{ vars.DEPLOYED_APP_URL }} \
+            --revision ${{ github.sha }}

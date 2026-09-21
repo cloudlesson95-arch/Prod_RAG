@@ -17,4 +17,11 @@ COPY baseline/ ./baseline/
 # Build the index during the image build process
 RUN python -m src.app index
 
-CMD ["python", "-m", "src.app", "evaluate"]
+EXPOSE 8000
+
+# Health check against the /health endpoint using Python stdlib 
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
+    CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+
+# Run API server 
+CMD ["python", "-m", "src.app", "serve", "--host", "0.0.0.0", "--port", "8000"]

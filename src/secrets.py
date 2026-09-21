@@ -58,6 +58,47 @@ class CompositeSecretProvider(SecretProvider):
         return self.fallback.get(name)
 
 
+class AzureKeyVaultSecretProvider(SecretProvider):
+    """Fetches secrets from Azure Key Vault using Managed Identity (or local az login)."""
+
+    def __init__(self, vault_url: str | None = None):
+        self.vault_url = vault_url
+        self._client = None
+
+    def _get_client(self):
+        if self._client is None:
+            if not self.vault_url:
+                try:
+                    from src.config import AZURE_KEYVAULT_URL
+                    self.vault_url = AZURE_KEYVAULT_URL
+                except (ImportError, AttributeError):
+                    self.vault_url = os.getenv("AZURE_KEYVAULT_URL", "")
+
+            if not self.vault_url:
+                logger.warning("[SecretProvider] AZURE_KEYVAULT_URL is empty; Key Vault lookup skipped.")
+                return None
+
+            from azure.identity import DefaultAzureCredential
+            from azure.keyvault.secrets import SecretClient
+            self._client = SecretClient(
+                vault_url=self.vault_url,
+                credential=DefaultAzureCredential(),
+            )
+        return self._client
+
+    def get(self, name: str) -> str | None:
+        try:
+            client = self._get_client()
+            if client is None:
+                return None
+            # Key Vault secret names cannot contain underscores; convert GROQ_API_KEY -> GROQ-API-KEY
+            kv_name = name.replace("_", "-")
+            return client.get_secret(kv_name).value
+        except Exception as e:
+            logger.warning(f"[SecretProvider] Azure Key Vault lookup failed for '{name}': {e}")
+            return None
+
+
 _secret_provider_instance: SecretProvider | None = None
 
 
@@ -73,7 +114,12 @@ def get_secret_provider() -> SecretProvider:
             backend = os.getenv("SECRET_BACKEND", "keyring").lower()
             service_name = os.getenv("KEYRING_SERVICE_NAME", "agentic-rag-platform")
 
-        if backend == "keyring":
+        if backend == "azure_keyvault":
+            _secret_provider_instance = CompositeSecretProvider(
+                primary=AzureKeyVaultSecretProvider(),
+                fallback=EnvSecretProvider(),
+            )
+        elif backend == "keyring":
             _secret_provider_instance = CompositeSecretProvider(
                 primary=KeyringSecretProvider(service_name=service_name),
                 fallback=EnvSecretProvider(),
