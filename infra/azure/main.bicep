@@ -109,8 +109,8 @@ resource containerApp 'Microsoft.App/containerApps@2023-05-01' = {
           name: 'rag-api'
           image: 'mcr.microsoft.com/k8se/quickstart:latest'
           resources: {
-            cpu: json('0.5')
-            memory: '1.0Gi'
+            cpu: json('1.0')
+            memory: '2.0Gi'
           }
           env: [
             {
@@ -137,7 +137,7 @@ resource containerApp 'Microsoft.App/containerApps@2023-05-01' = {
         }
       ]
       scale: {
-        minReplicas: 0
+        minReplicas: 1
         maxReplicas: 3
       }
     }

@@ -84,6 +84,21 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Wait for Container App Warmup
+        run: |
+          echo "Polling ${{ vars.DEPLOYED_APP_URL }}/health for container readiness..."
+          for i in {1..30}; do
+            HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${{ vars.DEPLOYED_APP_URL }}/health" || true)
+            if [ "$HTTP_STATUS" -eq 200 ]; then
+              echo "Container App is healthy and ready!"
+              exit 0
+            fi
+            echo "Attempt $i/30: HTTP $HTTP_STATUS - Container starting up, waiting 10s..."
+            sleep 10
+          done
+          echo "Timed out waiting for Container App health check."
+          exit 1
+
       - name: Run Live Evaluation Gate
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
