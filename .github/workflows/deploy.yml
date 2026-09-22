@@ -52,8 +52,9 @@ jobs:
 
       - name: Configure Registry & Update Container App
         run: |
-          # Fetch Managed Identity resource ID
+          # Fetch Managed Identity resource ID and Client ID
           IDENTITY_ID=$(az identity list --resource-group ${{ vars.RESOURCE_GROUP }} --query "[0].id" -o tsv)
+          CLIENT_ID=$(az identity list --resource-group ${{ vars.RESOURCE_GROUP }} --query "[0].clientId" -o tsv)
           
           # Link ACR registry authentication using Managed Identity
           az containerapp registry set \
@@ -62,11 +63,12 @@ jobs:
             --server "${{ vars.ACR_NAME }}.azurecr.io" \
             --identity "$IDENTITY_ID"
             
-          # Deploy newly pushed container image
+          # Deploy newly pushed container image with AZURE_CLIENT_ID set
           az containerapp update \
             --name ${{ vars.CONTAINER_APP_NAME }} \
             --resource-group ${{ vars.RESOURCE_GROUP }} \
-            --image "${{ vars.ACR_NAME }}.azurecr.io/rag-api:${{ github.sha }}"
+            --image "${{ vars.ACR_NAME }}.azurecr.io/rag-api:${{ github.sha }}" \
+            --set-env-vars "AZURE_CLIENT_ID=$CLIENT_ID"
 
   post-deploy-gate:
     name: Live Evaluation Gate

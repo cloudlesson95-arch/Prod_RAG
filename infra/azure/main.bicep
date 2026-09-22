@@ -114,6 +114,10 @@ resource containerApp 'Microsoft.App/containerApps@2023-05-01' = {
           }
           env: [
             {
+              name: 'AZURE_CLIENT_ID'
+              value: managedIdentity.properties.clientId
+            }
+            {
               name: 'SECRET_BACKEND'
               value: 'azure_keyvault'
             }
