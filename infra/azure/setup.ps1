@@ -1,5 +1,5 @@
 # ==============================================================================
-# Robust One-time Azure Provisioning & OIDC Setup Script
+# Dynamic & Portable Azure Provisioning & OIDC Setup Script
 # ==============================================================================
 param(
     [string]$ResourceGroupName = "rg-ragprod",
@@ -41,7 +41,7 @@ az role assignment create --assignee $managedIdentityPrincipalId --role "Key Vau
 $acrId = (az acr show --name $acrName --query id -o tsv)
 az role assignment create --assignee $managedIdentityPrincipalId --role "AcrPull" --scope $acrId 2>$null | Out-Null
 
-# Grant CURRENT SIGNED-IN USER write access to Key Vault (Key Vault Secrets Officer)
+# Grant current signed-in user write access to Key Vault (Key Vault Secrets Officer)
 $currentUser = (az ad signed-in-user show --query id -o tsv 2>$null)
 if (-not $currentUser) {
     $currentUser = (az account show --query user.name -o tsv)
@@ -64,7 +64,20 @@ if ($googleKey) {
     Write-Host "   GOOGLE-API-KEY stored in Key Vault." -ForegroundColor Green
 }
 
-Write-Host "5. Setting up OIDC for GitHub Actions ($GitHubRepo)..." -ForegroundColor Cyan
+Write-Host "5. Dynamically resolving GitHub OIDC Subject for '$GitHubRepo'..." -ForegroundColor Cyan
+$stdSubject = "repo:${GitHubRepo}:ref:refs/heads/main"
+
+# Query GitHub API to fetch internal Owner ID and Repo ID dynamically
+try {
+    $githubApi = Invoke-RestMethod -Uri "https://api.github.com/repos/$GitHubRepo" -UserAgent "PowerShell"
+    $ownerId = $githubApi.owner.id
+    $repoId = $githubApi.id
+    $parts = $GitHubRepo.Split('/')
+    $taggedSubject = "repo:$($parts[0])@${ownerId}/$($parts[1])@${repoId}:ref:refs/heads/main"
+} catch {
+    $taggedSubject = $null
+}
+
 $appName = "github-actions-ragprod"
 $app = az ad app list --display-name $appName -o json | ConvertFrom-Json
 
@@ -88,7 +101,7 @@ az role assignment create --assignee $appId --role "Contributor" --scope $rgId 2
 # Grant AcrPush on ACR to GitHub Actions
 az role assignment create --assignee $appId --role "AcrPush" --scope $acrId 2>$null | Out-Null
 
-# Ensure Federated Credential exists
+# Create Federated Credentials for standard subject format
 $fedCreds = az ad app federated-credential list --id $appId -o json | ConvertFrom-Json
 $fedExists = $fedCreds | Where-Object { $_.name -eq "github-actions-main" }
 
@@ -96,7 +109,7 @@ if (-not $fedExists) {
     $params = @{
         name = "github-actions-main"
         issuer = "https://token.actions.githubusercontent.com"
-        subject = "repo:${GitHubRepo}:ref:refs/heads/main"
+        subject = $stdSubject
         description = "GitHub Actions OIDC for main branch deploy"
         audiences = @("api://AzureADTokenExchange")
     } | ConvertTo-Json -Depth 3
@@ -105,6 +118,25 @@ if (-not $fedExists) {
     $params | Out-File -FilePath $tempFile -Encoding utf8
     az ad app federated-credential create --id $appId --parameters $tempFile | Out-Null
     Remove-Item $tempFile
+}
+
+# Create Federated Credential for ID-tagged subject format if applicable
+if ($taggedSubject) {
+    $fedTaggedExists = $fedCreds | Where-Object { $_.name -eq "github-actions-main-tagged" }
+    if (-not $fedTaggedExists) {
+        $paramsTagged = @{
+            name = "github-actions-main-tagged"
+            issuer = "https://token.actions.githubusercontent.com"
+            subject = $taggedSubject
+            description = "GitHub Actions OIDC with ID tags"
+            audiences = @("api://AzureADTokenExchange")
+        } | ConvertTo-Json -Depth 3
+
+        $tempFileTagged = [System.IO.Path]::GetTempFileName()
+        $paramsTagged | Out-File -FilePath $tempFileTagged -Encoding utf8
+        az ad app federated-credential create --id $appId --parameters $tempFileTagged 2>$null | Out-Null
+        Remove-Item $tempFileTagged
+    }
 }
 
 $tenantId = (az account show --query tenantId -o tsv)
