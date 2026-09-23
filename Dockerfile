@@ -1,7 +1,9 @@
 FROM python:3.10-slim
 
 # AWS Lambda Web Adapter
-COPY --from=public.ecr.aws/lambda/adapter:0.8.4 /lambda-adapter /opt/extensions/lambda-adapter
+COPY --from=public.ecr.aws/awsguru/aws-lambda-adapter:0.8.4 /lambda-adapter /opt/extensions/lambda-adapter
+# Inform AWS Lambda Web Adapter that FastAPI listens on port 8000
+ENV PORT=8000
 
 WORKDIR /app
 
