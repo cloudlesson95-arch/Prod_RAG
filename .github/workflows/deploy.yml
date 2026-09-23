@@ -1,11 +1,22 @@
-name: Deploy to Azure
+name: Deploy Multi-Cloud RAG Platform
 
 on:
   push:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      target_cloud:
+        description: 'Target Cloud Deployment'
+        required: true
+        default: 'both'
+        type: choice
+        options:
+          - azure
+          - aws
+          - both
 
 permissions:
-  id-token: write   # Required for Azure OIDC authentication
+  id-token: write   # Required for Azure & AWS OIDC authentication
   contents: read
 
 jobs:
@@ -17,27 +28,30 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Log in to Azure (OIDC)
+        if: ${{ github.event_name == 'push' || github.event.inputs.target_cloud == 'azure' || github.event.inputs.target_cloud == 'both' }}
         uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Log in to ACR
+      - name: Log in to Azure ACR
+        if: ${{ github.event_name == 'push' || github.event.inputs.target_cloud == 'azure' || github.event.inputs.target_cloud == 'both' }}
         run: az acr login --name ${{ vars.ACR_NAME }}
 
-      - name: Build & Push Docker Image
+      - name: Build & Push Image to ACR
+        if: ${{ github.event_name == 'push' || github.event.inputs.target_cloud == 'azure' || github.event.inputs.target_cloud == 'both' }}
         run: |
           IMAGE_URI="${{ vars.ACR_NAME }}.azurecr.io/rag-api:${{ github.sha }}"
           IMAGE_LATEST="${{ vars.ACR_NAME }}.azurecr.io/rag-api:latest"
-          
           docker build -t $IMAGE_URI -t $IMAGE_LATEST .
           docker push $IMAGE_URI
           docker push $IMAGE_LATEST
 
-  deploy:
-    name: Deploy to Container Apps
+  deploy-azure:
+    name: Deploy to Azure Container Apps
     needs: build-and-push
+    if: ${{ github.event_name == 'push' || github.event.inputs.target_cloud == 'azure' || github.event.inputs.target_cloud == 'both' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
@@ -52,27 +66,24 @@ jobs:
 
       - name: Configure Registry & Update Container App
         run: |
-          # Fetch Managed Identity resource ID and Client ID
           IDENTITY_ID=$(az identity list --resource-group ${{ vars.RESOURCE_GROUP }} --query "[0].id" -o tsv)
           CLIENT_ID=$(az identity list --resource-group ${{ vars.RESOURCE_GROUP }} --query "[0].clientId" -o tsv)
           
-          # Link ACR registry authentication using Managed Identity
           az containerapp registry set \
             --name ${{ vars.CONTAINER_APP_NAME }} \
             --resource-group ${{ vars.RESOURCE_GROUP }} \
             --server "${{ vars.ACR_NAME }}.azurecr.io" \
             --identity "$IDENTITY_ID"
             
-          # Deploy newly pushed container image with AZURE_CLIENT_ID set
           az containerapp update \
             --name ${{ vars.CONTAINER_APP_NAME }} \
             --resource-group ${{ vars.RESOURCE_GROUP }} \
             --image "${{ vars.ACR_NAME }}.azurecr.io/rag-api:${{ github.sha }}" \
-            --set-env-vars "AZURE_CLIENT_ID=$CLIENT_ID"
+            --set-env-vars "AZURE_CLIENT_ID=$CLIENT_ID" "SECRET_BACKEND=azure_keyvault"
 
-  post-deploy-gate:
-    name: Live Evaluation Gate
-    needs: deploy
+  post-deploy-azure-gate:
+    name: Live Evaluation Gate (Azure)
+    needs: deploy-azure
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
@@ -86,19 +97,17 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Wait for Container App Warmup
+      - name: Wait for Azure Container App Warmup
         run: |
-          echo "Polling ${{ vars.DEPLOYED_APP_URL }}/health for container readiness..."
+          echo "Polling ${{ vars.DEPLOYED_APP_URL }}/health..."
           for i in {1..30}; do
             HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${{ vars.DEPLOYED_APP_URL }}/health" || true)
             if [ "$HTTP_STATUS" -eq 200 ]; then
-              echo "Container App is healthy and ready!"
+              echo "Azure Container App is ready!"
               exit 0
             fi
-            echo "Attempt $i/30: HTTP $HTTP_STATUS - Container starting up, waiting 10s..."
             sleep 10
           done
-          echo "Timed out waiting for Container App health check."
           exit 1
 
       - name: Run Live Evaluation Gate
@@ -109,4 +118,120 @@ jobs:
         run: |
           python -m src.app live-eval \
             --target-url ${{ vars.DEPLOYED_APP_URL }} \
+            --revision ${{ github.sha }}
+
+  deploy-aws:
+    name: Deploy to AWS Lambda Container
+    needs: build-and-push
+    if: ${{ github.event_name == 'push' || github.event.inputs.target_cloud == 'aws' || github.event.inputs.target_cloud == 'both' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Log in to AWS ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build & Push Image to ECR
+        run: |
+          ECR_URI="${{ vars.AWS_ECR_REPO }}:${{ github.sha }}"
+          ECR_LATEST="${{ vars.AWS_ECR_REPO }}:latest"
+          docker build -t $ECR_URI -t $ECR_LATEST .
+          docker push $ECR_URI
+          docker push $ECR_LATEST
+
+      - name: Deploy / Update AWS Lambda Container
+        run: |
+          FUNCTION_NAME="ragprod-api"
+          IMAGE_URI="${{ vars.AWS_ECR_REPO }}:${{ github.sha }}"
+
+          if aws lambda get-function --function-name $FUNCTION_NAME --region ${{ vars.AWS_REGION }} 2>/dev/null; then
+            echo "Updating existing AWS Lambda function code..."
+            aws lambda update-function-code \
+              --function-name $FUNCTION_NAME \
+              --image-uri $IMAGE_URI \
+              --region ${{ vars.AWS_REGION }}
+          else
+            echo "Creating new AWS Lambda container function..."
+            aws lambda create-function \
+              --function-name $FUNCTION_NAME \
+              --package-type Image \
+              --code ImageUri=$IMAGE_URI \
+              --role ${{ vars.AWS_LAMBDA_ROLE_ARN }} \
+              --environment "Variables={SECRET_BACKEND=aws_secretsmanager,AWS_REGION=${{ vars.AWS_REGION }}}" \
+              --timeout 60 \
+              --memory-size 1024 \
+              --region ${{ vars.AWS_REGION }}
+
+            aws lambda create-function-url-config \
+              --function-name $FUNCTION_NAME \
+              --auth-type NONE \
+              --region ${{ vars.AWS_REGION }}
+
+            aws lambda add-permission \
+              --function-name $FUNCTION_NAME \
+              --statement-id FunctionURLAllowPublicAccess \
+              --action lambda:InvokeFunctionUrl \
+              --principal "*" \
+              --function-url-auth-type NONE \
+              --region ${{ vars.AWS_REGION }}
+          fi
+
+  post-deploy-aws-gate:
+    name: Live Evaluation Gate (AWS)
+    needs: deploy-aws
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Configure AWS Credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Get AWS Lambda Function URL
+        run: |
+          FUNCTION_NAME="ragprod-api"
+          URL_CONFIG=$(aws lambda get-function-url-config --function-name $FUNCTION_NAME --region ${{ vars.AWS_REGION }} --query "FunctionUrl" --output tsv)
+          CLEAN_URL=$(echo "$URL_CONFIG" | sed 's/\/$//')
+          echo "DEPLOYED_AWS_URL=$CLEAN_URL" >> $GITHUB_ENV
+
+      - name: Wait for AWS Lambda Warmup
+        run: |
+          echo "Polling $DEPLOYED_AWS_URL/health..."
+          for i in {1..30}; do
+            HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$DEPLOYED_AWS_URL/health" || true)
+            if [ "$HTTP_STATUS" -eq 200 ]; then
+              echo "AWS Lambda API is ready!"
+              exit 0
+            fi
+            sleep 10
+          done
+          exit 1
+
+      - name: Run Live Evaluation Gate
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          SECRET_BACKEND: env
+        run: |
+          python -m src.app live-eval \
+            --target-url $DEPLOYED_AWS_URL \
             --revision ${{ github.sha }}

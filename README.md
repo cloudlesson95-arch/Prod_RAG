@@ -1,6 +1,6 @@
 # Agentic RAG Platform 🚧 *(Work in Progress)*
 
-An enterprise-grade, agentic Retrieval-Augmented Generation (RAG) platform with classical ML routing, production telemetry, multi-backend secret management, Model Context Protocol (MCP) server support, and automated cloud CI/CD evaluation pipelines.
+An enterprise-grade, agentic Retrieval-Augmented Generation (RAG) platform with classical ML routing, production telemetry, multi-backend secret management, Model Context Protocol (MCP) server support, and automated multi-cloud CI/CD evaluation pipelines.
 
 ---
 
@@ -20,11 +20,13 @@ An enterprise-grade, agentic Retrieval-Augmented Generation (RAG) platform with 
 - **Drift Monitoring**: Population Stability Index (PSI) tracking query distribution drift.
 - **Live Evaluator**: HTTP-based evaluation engine running test suites against deployed endpoints.
 
-### Phase 4: Azure Cloud Deployment & Automated CI/CD
-- **Infrastructure-as-Code**: Declarative Bicep templates (`infra/azure/main.bicep`) provisioning Azure Container Apps, Azure Container Registry (ACR), Azure Key Vault, Application Insights, and User-Assigned Managed Identity.
-- **Cloud Secrets Integration**: `AzureKeyVaultSecretProvider` fetching secrets using Managed Identity (`DefaultAzureCredential`).
-- **OIDC Passwordless Authentication**: GitHub Actions OIDC federation for passwordless deployment.
-- **Automated CI/CD Pipeline**: GitHub Actions workflow (`.github/workflows/deploy.yml`) executing image build -> push -> deployment -> post-deployment live evaluation quality gate.
+### Phase 4: Multi-Cloud Deployment (Azure & AWS) & Automated CI/CD
+- **Multi-Cloud Infrastructure**: Dual cloud provisioners for Microsoft Azure (Container Apps) and Amazon Web Services (App Runner).
+  - **Azure**: Declarative Bicep templates (`infra/azure/main.bicep`) provisioning Container Apps, Container Registry (ACR), Key Vault, Application Insights, and User-Assigned Managed Identity.
+  - **AWS**: Automated PowerShell script (`infra/aws/setup.ps1`) provisioning ECR (`rag-api`), Secrets Manager, IAM Roles (`AppRunnerECRAccessRole`, `AppRunnerInstanceRole`), and GitHub OIDC role.
+- **Cloud Secrets Strategy**: Integrated `AzureKeyVaultSecretProvider` and `AWSSecretProvider` (`boto3`) dynamically loaded via `SECRET_BACKEND` env variable.
+- **Passwordless OIDC Auth**: Federated OpenID Connect (OIDC) identity for passwordless GitHub Actions deployments across both Azure and AWS.
+- **Unified Multi-Cloud CI/CD Pipeline**: GitHub Actions workflow (`.github/workflows/deploy.yml`) supporting matrix/targeted deployments (`azure`, `aws`, or `both`) with container image building, pushing, service updating, and post-deployment live evaluation quality gates.
 
 ---
 

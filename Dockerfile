@@ -1,5 +1,8 @@
 FROM python:3.10-slim
 
+# AWS Lambda Web Adapter
+COPY --from=public.ecr.aws/lambda/adapter:0.8.4 /lambda-adapter /opt/extensions/lambda-adapter
+
 WORKDIR /app
 
 # Ensure Python output is UTF-8 encoded

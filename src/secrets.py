@@ -99,6 +99,37 @@ class AzureKeyVaultSecretProvider(SecretProvider):
             return None
 
 
+class AWSSecretProvider(SecretProvider):
+    """Fetches secrets from AWS Secrets Manager using IAM Role / default credentials."""
+
+    def __init__(self, region_name: str | None = None):
+        self.region_name = region_name or os.getenv("AWS_REGION", "us-east-1")
+        self._client = None
+
+    def _get_client(self):
+        if self._client is None:
+            try:
+                import boto3
+                self._client = boto3.client("secretsmanager", region_name=self.region_name)
+            except Exception as e:
+                logger.warning(f"[SecretProvider] Failed to initialize AWS Secrets Manager client: {e}")
+                return None
+        return self._client
+
+    def get(self, name: str) -> str | None:
+        try:
+            client = self._get_client()
+            if client is None:
+                return None
+            response = client.get_secret_value(SecretId=name)
+            if "SecretString" in response:
+                return response["SecretString"]
+            return None
+        except Exception as e:
+            logger.warning(f"[SecretProvider] AWS Secrets Manager lookup failed for '{name}': {e}")
+            return None
+
+
 _secret_provider_instance: SecretProvider | None = None
 
 
@@ -117,6 +148,11 @@ def get_secret_provider() -> SecretProvider:
         if backend == "azure_keyvault":
             _secret_provider_instance = CompositeSecretProvider(
                 primary=AzureKeyVaultSecretProvider(),
+                fallback=EnvSecretProvider(),
+            )
+        elif backend == "aws_secretsmanager":
+            _secret_provider_instance = CompositeSecretProvider(
+                primary=AWSSecretProvider(),
                 fallback=EnvSecretProvider(),
             )
         elif backend == "keyring":

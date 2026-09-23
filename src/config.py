@@ -67,8 +67,9 @@ ENABLE_MULTI_HOP = True
 MAX_HOPS = 2
 
 # Secret Provider configuration
-SECRET_BACKEND = os.getenv("SECRET_BACKEND", "keyring")  # "keyring", "env"
+SECRET_BACKEND = os.getenv("SECRET_BACKEND", "keyring")  # "keyring", "env", "azure_keyvault", "aws_secretsmanager"
 KEYRING_SERVICE_NAME = os.getenv("KEYRING_SERVICE_NAME", "agentic-rag-platform")
+AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
 
 # Groundedness Check threshold
 GROUNDEDNESS_THRESHOLD = float(os.getenv("GROUNDEDNESS_THRESHOLD", "0.5"))
