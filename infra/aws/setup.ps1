@@ -136,7 +136,7 @@ if (Test-AwsResourceExists -CmdArgs @("iam", "get-open-id-connect-provider", "--
         "iam", "create-open-id-connect-provider",
         "--url", "https://token.actions.githubusercontent.com",
         "--client-id-list", "sts.amazonaws.com",
-        "--thumbprint-list", "6938fd5d98bab03faadb97b34396831e3780aea1"
+        "--thumbprint-list", "6938fd5d98bab03faadb97b34396831e3780aea1", "1c58a21d81938b15d7f8d59bb29c1583fd2ec1cf", "74966d2e0878180753200c682b13280058e57f20"
     ) | Out-Null
     Write-Host "   Created GitHub OIDC Provider in IAM." -ForegroundColor Green
 }
