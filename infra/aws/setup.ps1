@@ -56,6 +56,27 @@ if (Test-AwsResourceExists -CmdArgs @("ecr", "describe-repositories", "--reposit
 }
 $ecrUri = "$awsAccountId.dkr.ecr.$Region.amazonaws.com/$ecrRepoName"
 
+# Ensure ECR Repository Policy grants Lambda service pull access
+$ecrPolicyJson = @{
+    Version = "2012-10-17"
+    Statement = @(
+        @{
+            Sid = "LambdaECRImageRetrievalPolicy"
+            Effect = "Allow"
+            Principal = @{ Service = "lambda.amazonaws.com" }
+            Action = @("ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer")
+        }
+    )
+} | ConvertTo-Json -Depth 5
+
+$tempEcrPol = [System.IO.Path]::GetTempFileName()
+try {
+    Write-JsonFileNoBOM -FilePath $tempEcrPol -JsonContent $ecrPolicyJson
+    Invoke-AwsCmd -CmdArgs @("ecr", "set-repository-policy", "--repository-name", $ecrRepoName, "--policy-text", "file://$tempEcrPol", "--region", $Region) | Out-Null
+} finally {
+    Remove-Item $tempEcrPol -ErrorAction SilentlyContinue
+}
+
 # 2. AWS Secrets Manager Seeding
 Write-Host "`n3. Seeding secrets into AWS Secrets Manager..." -ForegroundColor Cyan
 $groqKey = Read-Host "Enter GROQ_API_KEY (press Enter to skip if already created)"
@@ -103,6 +124,7 @@ if (Test-AwsResourceExists -CmdArgs @("iam", "get-role", "--role-name", $lambdaR
         Write-JsonFileNoBOM -FilePath $tempTrust -JsonContent $lambdaTrustPolicy
         Invoke-AwsCmd -CmdArgs @("iam", "create-role", "--role-name", $lambdaRoleName, "--assume-role-policy-document", "file://$tempTrust") | Out-Null
         Invoke-AwsCmd -CmdArgs @("iam", "attach-role-policy", "--role-name", $lambdaRoleName, "--policy-arn", "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole") | Out-Null
+        Invoke-AwsCmd -CmdArgs @("iam", "attach-role-policy", "--role-name", $lambdaRoleName, "--policy-arn", "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly") | Out-Null
 
         $secretsPolicy = @{
             Version = "2012-10-17"
