@@ -184,6 +184,9 @@ jobs:
               --region ${{ vars.AWS_REGION }}
           fi
 
+          echo "Waiting for Lambda function update to complete..."
+          aws lambda wait function-updated --function-name $FUNCTION_NAME --region ${{ vars.AWS_REGION }}
+
   post-deploy-aws-gate:
     name: Live Evaluation Gate (AWS)
     needs: deploy-aws
@@ -209,7 +212,7 @@ jobs:
       - name: Get AWS Lambda Function URL
         run: |
           FUNCTION_NAME="ragprod-api"
-          URL_CONFIG=$(aws lambda get-function-url-config --function-name $FUNCTION_NAME --region ${{ vars.AWS_REGION }} --query "FunctionUrl" --output tsv)
+          URL_CONFIG=$(aws lambda get-function-url-config --function-name $FUNCTION_NAME --region ${{ vars.AWS_REGION }} --query "FunctionUrl" --output text)
           CLEAN_URL=$(echo "$URL_CONFIG" | sed 's/\/$//')
           echo "DEPLOYED_AWS_URL=$CLEAN_URL" >> $GITHUB_ENV
 
