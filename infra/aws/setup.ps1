@@ -142,6 +142,13 @@ if (Test-AwsResourceExists -CmdArgs @("iam", "get-open-id-connect-provider", "--
 }
 
 $githubRoleName = "github-actions-ragprod-aws-role"
+
+# Dynamically split "owner/repo" into owner and repo parts to handle optional numeric ID tags
+$repoParts = $GitHubRepo.Split('/')
+$ghOwner = $repoParts[0]
+$ghRepo = $repoParts[1]
+$subPattern = "repo:${ghOwner}*/*${ghRepo}*:*"
+
 $githubTrustPolicy = @{
     Version = "2012-10-17"
     Statement = @(
@@ -151,7 +158,7 @@ $githubTrustPolicy = @{
             Action = "sts:AssumeRoleWithWebIdentity"
             Condition = @{
                 StringEquals = @{ "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com" }
-                StringLike = @{ "token.actions.githubusercontent.com:sub" = "repo:${GitHubRepo}:*" }
+                StringLike = @{ "token.actions.githubusercontent.com:sub" = $subPattern }
             }
         }
     )
