@@ -158,6 +158,11 @@ jobs:
               --function-name $FUNCTION_NAME \
               --image-uri $IMAGE_URI \
               --region ${{ vars.AWS_REGION }}
+
+            aws lambda update-function-configuration \
+              --function-name $FUNCTION_NAME \
+              --region ${{ vars.AWS_REGION }} \
+              --environment "Variables={SECRET_BACKEND=aws_secretsmanager,LOG_TO_FILE=false,LOG_TO_CONSOLE=true}"
           else
             echo "Creating new AWS Lambda container function..."
             aws lambda create-function \
@@ -165,7 +170,7 @@ jobs:
               --package-type Image \
               --code ImageUri=$IMAGE_URI \
               --role ${{ vars.AWS_LAMBDA_ROLE_ARN }} \
-              --environment "Variables={SECRET_BACKEND=aws_secretsmanager}" \
+              --environment "Variables={SECRET_BACKEND=aws_secretsmanager,LOG_TO_FILE=false,LOG_TO_CONSOLE=true}" \
               --timeout 60 \
               --memory-size 1024 \
               --region ${{ vars.AWS_REGION }}

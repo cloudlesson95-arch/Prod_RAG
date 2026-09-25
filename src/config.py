@@ -27,9 +27,9 @@ DATA_DIR = os.path.join(BASE_DIR, "data")
 
 # Logging configuration
 LOG_LEVEL = "INFO"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
-LOG_TO_CONSOLE = True 
-LOG_TO_FILE = True 
-LOG_FILE_PATH = os.path.join("logs", "app.log")
+LOG_TO_CONSOLE = os.getenv("LOG_TO_CONSOLE", "true").lower() in ("1", "true", "yes")
+LOG_TO_FILE = os.getenv("LOG_TO_FILE", "true").lower() in ("1", "true", "yes")
+LOG_FILE_PATH = os.getenv("LOG_FILE_PATH", os.path.join("logs", "app.log"))
 LOG_FORMAT = '%(message)s'
 LOG_DATE_FORMAT = '%Y-%m-%d %H:%M:%S'
 CAPTURE_EXTERNAL_LOGS = False  # Capture logs from external libraries
