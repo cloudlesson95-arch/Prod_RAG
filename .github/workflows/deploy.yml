@@ -159,10 +159,21 @@ jobs:
               --image-uri $IMAGE_URI \
               --region ${{ vars.AWS_REGION }}
 
+            echo "Waiting for Lambda code update to complete..."
+            aws lambda wait function-updated \
+              --function-name $FUNCTION_NAME \
+              --region ${{ vars.AWS_REGION }}
+
+            echo "Updating Lambda environment configuration..."
             aws lambda update-function-configuration \
               --function-name $FUNCTION_NAME \
               --region ${{ vars.AWS_REGION }} \
               --environment "Variables={SECRET_BACKEND=aws_secretsmanager,LOG_TO_FILE=false,LOG_TO_CONSOLE=true}"
+
+            echo "Waiting for Lambda configuration update to complete..."
+            aws lambda wait function-updated \
+              --function-name $FUNCTION_NAME \
+              --region ${{ vars.AWS_REGION }}
           else
             echo "Creating new AWS Lambda container function..."
             aws lambda create-function \
