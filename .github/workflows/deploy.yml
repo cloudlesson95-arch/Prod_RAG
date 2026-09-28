@@ -168,7 +168,9 @@ jobs:
             aws lambda update-function-configuration \
               --function-name $FUNCTION_NAME \
               --region ${{ vars.AWS_REGION }} \
-              --environment "Variables={SECRET_BACKEND=aws_secretsmanager,LOG_TO_FILE=false,LOG_TO_CONSOLE=true}"
+              --timeout 300 \
+              --memory-size 3008 \
+              --environment "Variables={SECRET_BACKEND=aws_secretsmanager,LOG_TO_FILE=false,LOG_TO_CONSOLE=true,LOCAL_DIR=/tmp/.local,HOME=/tmp,HF_HUB_OFFLINE=1,TRANSFORMERS_OFFLINE=1,AWS_LWA_ASYNC_INIT=true}"
 
             echo "Waiting for Lambda configuration update to complete..."
             aws lambda wait function-updated \
@@ -181,9 +183,9 @@ jobs:
               --package-type Image \
               --code ImageUri=$IMAGE_URI \
               --role ${{ vars.AWS_LAMBDA_ROLE_ARN }} \
-              --environment "Variables={SECRET_BACKEND=aws_secretsmanager,LOG_TO_FILE=false,LOG_TO_CONSOLE=true}" \
-              --timeout 60 \
-              --memory-size 1024 \
+              --environment "Variables={SECRET_BACKEND=aws_secretsmanager,LOG_TO_FILE=false,LOG_TO_CONSOLE=true,LOCAL_DIR=/tmp/.local,HOME=/tmp,HF_HUB_OFFLINE=1,TRANSFORMERS_OFFLINE=1,AWS_LWA_ASYNC_INIT=true}" \
+              --timeout 300 \
+              --memory-size 3008 \
               --region ${{ vars.AWS_REGION }}
 
             aws lambda create-function-url-config \
@@ -197,6 +199,14 @@ jobs:
               --action lambda:InvokeFunctionUrl \
               --principal "*" \
               --function-url-auth-type NONE \
+              --region ${{ vars.AWS_REGION }}
+
+            aws lambda add-permission \
+              --function-name $FUNCTION_NAME \
+              --statement-id FunctionURLAllowInvokeAction \
+              --action lambda:InvokeFunction \
+              --principal "*" \
+              --invoked-via-function-url \
               --region ${{ vars.AWS_REGION }}
           fi
 

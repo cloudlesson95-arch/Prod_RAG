@@ -21,7 +21,7 @@ EVAL_LLM_MODEL = "groq" # or gemini
 
 # Database & Runtime Storage paths
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-LOCAL_DIR = os.path.join(BASE_DIR, ".local")
+LOCAL_DIR = os.getenv("LOCAL_DIR", os.path.join(BASE_DIR, ".local"))
 CHROMA_PERSIST_DIR = os.path.join(LOCAL_DIR, "chroma_db")
 DATA_DIR = os.path.join(BASE_DIR, "data")
 
