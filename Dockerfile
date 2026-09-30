@@ -34,6 +34,6 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
     CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
 
-# Run API server. If LOCAL_DIR is set (AWS Lambda: /tmp/.local), copy the bundled .local there first,
-# because the image filesystem is read-only on Lambda. Without LOCAL_DIR, it starts exactly as before.
-CMD ["sh", "-c", "if [ -n \"$LOCAL_DIR\" ] && [ ! -d \"$LOCAL_DIR\" ]; then cp -r /app/.local \"$LOCAL_DIR\"; fi; exec python -m src.app serve --host 0.0.0.0 --port 8000"]
+# Run API server. On startup the app prepares its own working copy (src/storage/state_sync.py):
+# it restores the state snapshot, or copies the bundled seed when LOCAL_DIR/DATA_DIR point elsewhere.
+CMD ["python", "-m", "src.app", "serve", "--host", "0.0.0.0", "--port", "8000"]

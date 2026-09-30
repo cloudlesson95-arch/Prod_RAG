@@ -43,21 +43,18 @@ def main():
     live_eval_parser.add_argument("--target-url", required=True, help="Target API URL (e.g. http://localhost:8000)")
     live_eval_parser.add_argument("--revision", default=None, help="Git SHA or release tag")
 
+    # State snapshot commands
+    state_parser = subparsers.add_parser("state", help="Inspect or restore the persistent state snapshot")
+    state_parser.add_argument("action", choices=["status", "pull"],
+                              help="status: show versions; pull: restore the latest snapshot into the working dirs")
+
     args = parser.parse_args() 
 
     if args.command == "index":
-        from src.core.vectorstore import sync_incremental_index
-        from src.routing.clustering import train_clustering
-        from src.routing.classifier import train_classifier
-        
-        logger.info(f"Running document index sync (rebuild={args.rebuild})...")
-        vectorstore, changed_sources = sync_incremental_index(force_rebuild=args.rebuild)
-        
-        logger.info("Updating classical ML routing models...")
-        train_clustering(changed_sources=changed_sources, force_rebuild=args.rebuild)
-        train_classifier()
+        from src.core.indexing import reindex
+        reindex(force_rebuild=args.rebuild)
         logger.info("Index sync and ML model update completed.")
-        
+
     elif args.command == "query":
         from src.core.vectorstore import create_or_get_vectorstore
         from src.core.rag_agent import setup_router, answer_question
@@ -120,6 +117,26 @@ def main():
             sys.exit(1)
         else:
             sys.exit(0)
+
+    elif args.command == "state":
+        import sys
+        from src.config import STATE_BACKEND, DATA_DIR, LOCAL_DIR
+        from src.storage.state_store import get_state_store
+        from src.storage.state_sync import initialize_state, read_local_version, read_only_reason
+
+        if args.action == "pull":
+            initialize_state()
+            if read_only_reason():
+                print(f"Pull failed: {read_only_reason()}")
+                sys.exit(1)
+
+        store = get_state_store()
+        stored = (store.current_version() or "-") if store else "n/a (local backend)"
+        print(f"Backend:        {STATE_BACKEND}")
+        print(f"Data dir:       {DATA_DIR}")
+        print(f"Local dir:      {LOCAL_DIR}")
+        print(f"Local version:  {read_local_version() or '-'}")
+        print(f"Stored version: {stored}")
             
     else:
         parser.print_help()
