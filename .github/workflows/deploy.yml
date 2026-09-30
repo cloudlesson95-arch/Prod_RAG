@@ -79,7 +79,7 @@ jobs:
             --name ${{ vars.CONTAINER_APP_NAME }} \
             --resource-group ${{ vars.RESOURCE_GROUP }} \
             --image "${{ vars.ACR_NAME }}.azurecr.io/rag-api:${{ github.sha }}" \
-            --set-env-vars "AZURE_CLIENT_ID=$CLIENT_ID" "SECRET_BACKEND=azure_keyvault"
+            --set-env-vars "AZURE_CLIENT_ID=$CLIENT_ID" "SECRET_BACKEND=azure_keyvault" "MCP_DNS_REBINDING_PROTECTION=false"
 
   post-deploy-azure-gate:
     name: Live Evaluation Gate (Azure)
@@ -170,7 +170,7 @@ jobs:
               --region ${{ vars.AWS_REGION }} \
               --timeout 300 \
               --memory-size 3008 \
-              --environment "Variables={SECRET_BACKEND=aws_secretsmanager,LOG_TO_FILE=false,LOG_TO_CONSOLE=true,LOCAL_DIR=/tmp/.local,HOME=/tmp,HF_HUB_OFFLINE=1,TRANSFORMERS_OFFLINE=1,AWS_LWA_ASYNC_INIT=true}"
+              --environment "Variables={SECRET_BACKEND=aws_secretsmanager,LOG_TO_FILE=false,LOG_TO_CONSOLE=true,LOCAL_DIR=/tmp/.local,HOME=/tmp,HF_HUB_OFFLINE=1,TRANSFORMERS_OFFLINE=1,AWS_LWA_ASYNC_INIT=true,MCP_DNS_REBINDING_PROTECTION=false}"
 
             echo "Waiting for Lambda configuration update to complete..."
             aws lambda wait function-updated \
@@ -183,7 +183,7 @@ jobs:
               --package-type Image \
               --code ImageUri=$IMAGE_URI \
               --role ${{ vars.AWS_LAMBDA_ROLE_ARN }} \
-              --environment "Variables={SECRET_BACKEND=aws_secretsmanager,LOG_TO_FILE=false,LOG_TO_CONSOLE=true,LOCAL_DIR=/tmp/.local,HOME=/tmp,HF_HUB_OFFLINE=1,TRANSFORMERS_OFFLINE=1,AWS_LWA_ASYNC_INIT=true}" \
+              --environment "Variables={SECRET_BACKEND=aws_secretsmanager,LOG_TO_FILE=false,LOG_TO_CONSOLE=true,LOCAL_DIR=/tmp/.local,HOME=/tmp,HF_HUB_OFFLINE=1,TRANSFORMERS_OFFLINE=1,AWS_LWA_ASYNC_INIT=true,MCP_DNS_REBINDING_PROTECTION=false}" \
               --timeout 300 \
               --memory-size 3008 \
               --region ${{ vars.AWS_REGION }}

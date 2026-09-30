@@ -2,9 +2,10 @@ import os
 from typing import Dict, Any, List
 from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 
 from src.logging_config import setup_logging
-from src.config import MAIN_LLM_MODEL
+from src.config import MAIN_LLM_MODEL, MCP_DNS_REBINDING_PROTECTION
 from src.core.utils import create_llm
 from src.core.vectorstore import create_or_get_vectorstore
 from src.core.rag_agent import retrieve_chunks
@@ -14,10 +15,23 @@ from src.retrieval.multi_hop import execute_multi_hop_pipeline
 load_dotenv()
 logger = setup_logging(__name__)
 
+
+def build_transport_security(protection_enabled: bool = MCP_DNS_REBINDING_PROTECTION) -> TransportSecuritySettings | None:
+    """Return the MCP HTTP transport security settings.
+
+    None keeps the SDK default: DNS rebinding protection that only accepts localhost Host headers.
+    Public deployments disable it, since their Host header is the cloud hostname.
+    """
+    if protection_enabled:
+        return None
+    return TransportSecuritySettings(enable_dns_rebinding_protection=False)
+
+
 # Initialize FastMCP Server
 mcp = FastMCP(
     "rag-retrieval",
-    instructions="Agentic RAG tools for searching documents, routing queries, checking corpus statistics, and executing multi-hop searches."
+    instructions="Agentic RAG tools for searching documents, routing queries, checking corpus statistics, and executing multi-hop searches.",
+    transport_security=build_transport_security(),
 )
 
 # Global lazily-initialized RAG singletons

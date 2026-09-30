@@ -1,5 +1,5 @@
 import pytest
-from src.core.mcp_server import search_documents, route_query, get_corpus_stats
+from src.core.mcp_server import search_documents, route_query, get_corpus_stats, build_transport_security
 
 def test_search_documents():
     """Verify search_documents tool returns JSON-serializable list of dicts."""
@@ -21,3 +21,12 @@ def test_get_corpus_stats():
     """Verify get_corpus_stats returns document registry mapping."""
     stats = get_corpus_stats()
     assert isinstance(stats, dict)
+
+def test_transport_security_keeps_sdk_default_when_protection_enabled():
+    """Verify the default leaves the SDK's localhost-only Host check in place."""
+    assert build_transport_security(True) is None
+
+def test_transport_security_disables_host_check_for_public_deployments():
+    """Verify MCP_DNS_REBINDING_PROTECTION=false turns the Host/Origin check off."""
+    settings = build_transport_security(False)
+    assert settings.enable_dns_rebinding_protection is False

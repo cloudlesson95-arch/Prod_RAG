@@ -34,7 +34,8 @@ def startup_event():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     startup_event()
-    yield
+    async with mcp.session_manager.run():
+        yield
 
 app = FastAPI(
     title = "Simple RAG API",
@@ -42,8 +43,6 @@ app = FastAPI(
     version = "1.0.0",
     lifespan = lifespan
 )
-
-app.mount("/mcp", mcp.streamable_http_app())
 
 class QueryRequest(BaseModel):
     question: str = Field(..., examples=["What is a group of cats called?"])
@@ -72,3 +71,7 @@ def query_rag(request: QueryRequest):
     except Exception as e:
         logger.error(f"Error processing query: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error processing query")
+
+# MCP over HTTP at /mcp (the SDK's own route inside this sub-app). Mounted at the root, which matches
+# every path, so it must stay the LAST route: anything registered after it would be unreachable.
+app.mount("/", mcp.streamable_http_app())

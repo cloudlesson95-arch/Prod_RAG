@@ -94,3 +94,7 @@ AZURE_STORAGE_ACCOUNT_URL = os.getenv("AZURE_STORAGE_ACCOUNT_URL", "")
 AZURE_STATE_CONTAINER = os.getenv("AZURE_STATE_CONTAINER", "rag-state")
 AZURE_STORAGE_CONNECTION_STRING = os.getenv("AZURE_STORAGE_CONNECTION_STRING", "")  # local Azurite testing only
 S3_STATE_BUCKET = os.getenv("S3_STATE_BUCKET", "")
+
+# MCP server (HTTP transport). The SDK's DNS rebinding protection only accepts localhost Host headers,
+# which is right for a local server; public deployments set this to false (main.bicep, deploy.yml).
+MCP_DNS_REBINDING_PROTECTION = os.getenv("MCP_DNS_REBINDING_PROTECTION", "true").lower() in ("1", "true", "yes")

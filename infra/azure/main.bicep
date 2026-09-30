@@ -137,6 +137,11 @@ resource containerApp 'Microsoft.App/containerApps@2023-05-01' = {
               name: 'MAIN_LLM_MODEL'
               value: 'groq'
             }
+            {
+              // Public endpoint: the MCP SDK's localhost-only Host check would reject the cloud hostname (421)
+              name: 'MCP_DNS_REBINDING_PROTECTION'
+              value: 'false'
+            }
           ]
         }
       ]
