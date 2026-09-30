@@ -10,3 +10,4 @@ logs/
 *.db
 baseline/summary.md
 infra/azure/main.json
+data/ingested/

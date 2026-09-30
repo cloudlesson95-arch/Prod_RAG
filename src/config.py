@@ -21,9 +21,16 @@ EVAL_LLM_MODEL = "groq" # or gemini
 
 # Database & Runtime Storage paths
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-LOCAL_DIR = os.getenv("LOCAL_DIR", os.path.join(BASE_DIR, ".local"))
+
+# Seed state baked into the image at build time (read-only on AWS Lambda)
+SEED_DATA_DIR = os.path.join(BASE_DIR, "data")
+SEED_LOCAL_DIR = os.path.join(BASE_DIR, ".local")
+
+# Working copy the app reads and writes. Defaults to the seed dirs locally
+LOCAL_DIR = os.path.abspath(os.getenv("LOCAL_DIR", SEED_LOCAL_DIR))
+DATA_DIR = os.path.abspath(os.getenv("DATA_DIR", SEED_DATA_DIR))
+INGESTED_DATA_DIR = os.path.join(DATA_DIR, "ingested")
 CHROMA_PERSIST_DIR = os.path.join(LOCAL_DIR, "chroma_db")
-DATA_DIR = os.path.join(BASE_DIR, "data")
 
 # Logging configuration
 LOG_LEVEL = "INFO"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
@@ -79,3 +86,11 @@ APPLICATIONINSIGHTS_CONNECTION_STRING = os.getenv("APPLICATIONINSIGHTS_CONNECTIO
 
 # Azure Key Vault configuration
 AZURE_KEYVAULT_URL = os.getenv("AZURE_KEYVAULT_URL", "")
+
+# Persistent state snapshots
+STATE_BACKEND = os.getenv("STATE_BACKEND", "local")  # "local", "azure_blob", "s3"
+STATE_SNAPSHOT_NAME = os.getenv("STATE_SNAPSHOT_NAME", "state.tar.gz")
+AZURE_STORAGE_ACCOUNT_URL = os.getenv("AZURE_STORAGE_ACCOUNT_URL", "")
+AZURE_STATE_CONTAINER = os.getenv("AZURE_STATE_CONTAINER", "rag-state")
+AZURE_STORAGE_CONNECTION_STRING = os.getenv("AZURE_STORAGE_CONNECTION_STRING", "")  # local Azurite testing only
+S3_STATE_BUCKET = os.getenv("S3_STATE_BUCKET", "")
