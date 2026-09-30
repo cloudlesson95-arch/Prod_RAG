@@ -51,8 +51,16 @@ def main():
     args = parser.parse_args() 
 
     if args.command == "index":
+        import sys
         from src.core.indexing import reindex
-        reindex(force_rebuild=args.rebuild)
+        from src.storage.state_store import SnapshotConflict
+        try:
+            reindex(force_rebuild=args.rebuild)
+        except SnapshotConflict as e:
+            print(f"Index not published: {e}.\n"
+                  "Your working copy is out of date. 'python -m src.app state pull' replaces DATA_DIR "
+                  "with the latest snapshot, so save any new files first, then repeat your change.")
+            sys.exit(1)
         logger.info("Index sync and ML model update completed.")
 
     elif args.command == "query":

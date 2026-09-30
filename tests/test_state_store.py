@@ -1,5 +1,16 @@
+import os
+import uuid
+
 import pytest
-from src.storage.state_store import get_state_store, SnapshotConflict
+from azure.core.exceptions import ResourceNotFoundError
+from azure.storage.blob import BlobServiceClient
+
+from src.storage import state_store
+from src.storage.state_store import get_state_store, SnapshotConflict, AzureBlobStateStore
+
+AZURITE_CONNECTION_STRING = os.getenv("AZURITE_CONNECTION_STRING", "")
+needs_azurite = pytest.mark.skipif(not AZURITE_CONNECTION_STRING,
+                                   reason="set AZURITE_CONNECTION_STRING to run against Azurite")
 
 
 def check_store_contract(store, tmp_path):
@@ -44,3 +55,38 @@ def test_unknown_backend_raises():
     """Verify a mistyped backend fails loudly instead of silently running local-only."""
     with pytest.raises(ValueError):
         get_state_store("azure-blob")
+
+
+def test_azure_backend_requires_url_or_connection_string(monkeypatch):
+    """Verify a missing Azure config fails at startup instead of at the first write."""
+    monkeypatch.setattr(state_store, "AZURE_STORAGE_ACCOUNT_URL", "")
+    monkeypatch.setattr(state_store, "AZURE_STORAGE_CONNECTION_STRING", "")
+    with pytest.raises(ValueError):
+        get_state_store("azure_blob")
+
+
+@pytest.fixture
+def azurite_container():
+    """Create a throwaway container in Azurite and delete it after the test."""
+    service = BlobServiceClient.from_connection_string(AZURITE_CONNECTION_STRING)
+    name = f"test-{uuid.uuid4().hex[:12]}"
+    service.create_container(name)
+    yield name
+    service.delete_container(name)
+
+
+@needs_azurite
+def test_azure_blob_store_contract(azurite_container, tmp_path):
+    """Verify the Azure backend honors the same contract as the fake."""
+    store = AzureBlobStateStore(azurite_container, "state.tar.gz", connection_string=AZURITE_CONNECTION_STRING)
+    check_store_contract(store, tmp_path)
+
+
+@needs_azurite
+def test_azure_blob_missing_container_is_an_error_not_an_empty_store(tmp_path):
+    """Verify a wrong container name raises instead of looking like 'no snapshot yet'."""
+    store = AzureBlobStateStore("no-such-container", "state.tar.gz", connection_string=AZURITE_CONNECTION_STRING)
+    with pytest.raises(ResourceNotFoundError):
+        store.download(str(tmp_path / "out"))
+    with pytest.raises(ResourceNotFoundError):
+        store.current_version()
