@@ -88,31 +88,45 @@ def train_clustering(changed_sources: set = None, force_rebuild: bool = False):
             visualize_clusters(np.array(all_embeddings), sources)
 
 def visualize_clusters(X, sources):
-    """Generate a 2D visualization using t-SNE."""
-    logger.info("Generating cluster visualization... (this might take a few seconds)")
+    """Generate a 2D visualization using t-SNE.
 
-    # t-SNE reduces 384-dimensional embeddings down to 2 dimensions for plotting
-    tsne = TSNE(n_components=2, random_state=42)
-    X_2d = tsne.fit_transform(X)
+    Best-effort diagnostics: a failure here is logged and never fails indexing.
+    """
+    if len(X) < 2:
+        logger.info("Skipping cluster visualization: fewer than 2 embeddings.")
+        return
+    try:
+        logger.info("Generating cluster visualization... (this might take a few seconds)")
 
-    # Unique color IDs for plotting
-    unique_sources = list(set(sources))
-    source_to_id = {src: i for i, src in enumerate(unique_sources)}
-    color_ids = [source_to_id[src] for src in sources]
+        # t-SNE reduces 384-dimensional embeddings down to 2 dimensions for plotting.
+        # Perplexity must be below the number of samples (sklearn's default is 30).
+        tsne = TSNE(n_components=2, random_state=42, perplexity=min(30.0, len(X) - 1))
 
-    plt.figure(figsize=(10, 8))
-    scatter = plt.scatter(X_2d[:, 0], X_2d[:, 1], c=color_ids, cmap='tab10', alpha=0.6)
+        X_2d = tsne.fit_transform(X)
 
-    # Add legend
-    handles, _ = scatter.legend_elements()
-    plt.legend(handles, unique_sources, title="Sources")
-    plt.title("Document Embeddings by Source")
+        # Unique color IDs for plotting
+        unique_sources = list(set(sources))
+        source_to_id = {src: i for i, src in enumerate(unique_sources)}
+        color_ids = [source_to_id[src] for src in sources]
 
-    save_path = os.path.join(CLUSTERS_DIR, "cluster_visualization.png")
-    plt.savefig(save_path)
-    plt.close()
-    
-    logger.info(f"Visualization saved as {save_path}")
+        plt.figure(figsize=(10, 8))
+        scatter = plt.scatter(X_2d[:, 0], X_2d[:, 1], c=color_ids, cmap='tab10', alpha=0.6)
+
+        # Add legend
+        handles, _ = scatter.legend_elements()
+        plt.legend(handles, unique_sources, title="Sources")
+        plt.title("Document Embeddings by Source")
+
+        save_path = os.path.join(CLUSTERS_DIR, "cluster_visualization.png")
+        plt.savefig(save_path)
+        plt.close()
+        
+        logger.info(f"Visualization saved as {save_path}")
+
+    except Exception as e:
+        plt.close("all")
+        logger.warning(f"[Clustering] Cluster visualization failed; index and centroids are unaffected: {e}")
+
 
 def predict_source(query_embedding):
     """Predict the source for a query by finding the nearest document centroid."""

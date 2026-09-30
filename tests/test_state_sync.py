@@ -243,3 +243,15 @@ def test_remote_backend_rejects_seed_dirs_as_working_dirs(state_env, monkeypatch
     monkeypatch.setattr(state_sync, "DATA_DIR", state_sync.SEED_DATA_DIR)
     with pytest.raises(ValueError):
         initialize_state()
+
+
+def test_seed_from_image_ignores_leftovers_in_data_dir(tmp_path):
+    """Verify leftover files in DATA_DIR don't stop the corpus from being seeded with the index."""
+    seed_data, seed_local = make_state(tmp_path / "image")
+    data, local = tmp_path / "work" / "data", tmp_path / "work" / ".local"
+    (data / "ingested").mkdir(parents=True)
+    (data / "ingested" / "leftover.txt").write_text("from an earlier run")
+
+    assert seed_from_image(str(data), str(local), seed_data, seed_local) is True
+    assert (data / "cat-facts.txt").exists()
+    assert (data / "ingested" / "leftover.txt").exists()

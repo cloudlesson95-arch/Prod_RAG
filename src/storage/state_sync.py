@@ -56,24 +56,25 @@ def seed_from_image(
     seed_data_dir: str = SEED_DATA_DIR,
     seed_local_dir: str = SEED_LOCAL_DIR,
 ) -> bool:
-    """Copy the image's seed corpus and prebuilt index into empty working dirs.
+    """Copy the image's seed corpus and prebuilt index into an uninitialized working copy.
+
+    The working copy counts as initialized once local_dir has a chroma_db. The corpus is
+    seeded in the same step, so the index and the files it was built from always match.
 
     Returns:
         bool: True if anything was copied.
     """
-    copied = False
-    if not _same_path(data_dir, seed_data_dir) and not _has_files(data_dir):
+    if _same_path(local_dir, seed_local_dir) or os.path.exists(os.path.join(local_dir, "chroma_db")):
+        return False
+
+    if not _same_path(data_dir, seed_data_dir):
         shutil.copytree(seed_data_dir, data_dir, dirs_exist_ok=True)
-        copied = True
-    if not _same_path(local_dir, seed_local_dir) and not os.path.exists(os.path.join(local_dir, "chroma_db")):
-        shutil.copytree(
-            seed_local_dir, local_dir, dirs_exist_ok=True,
-            ignore=shutil.ignore_patterns("s_cache", SNAPSHOT_VERSION_FILE),
-        )
-        copied = True
-    if copied:
-        logger.info(f"[State] Seeded working dirs from image ('{seed_data_dir}', '{seed_local_dir}')")
-    return copied
+    shutil.copytree(
+        seed_local_dir, local_dir, dirs_exist_ok=True,
+        ignore=shutil.ignore_patterns("s_cache", SNAPSHOT_VERSION_FILE),
+    )
+    logger.info(f"[State] Seeded working dirs from image ('{seed_data_dir}', '{seed_local_dir}')")
+    return True
 
 
 def read_local_version(local_dir: str = LOCAL_DIR) -> str | None:
@@ -105,10 +106,6 @@ def _replace(src: str, dest: str) -> None:
 
 def _same_path(a: str, b: str) -> bool:
     return os.path.normcase(os.path.abspath(a)) == os.path.normcase(os.path.abspath(b))
-
-
-def _has_files(path: str) -> bool:
-    return os.path.isdir(path) and bool(os.listdir(path))
 
 
 class StateReadOnlyError(Exception):
