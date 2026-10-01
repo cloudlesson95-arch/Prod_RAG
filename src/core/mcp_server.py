@@ -32,6 +32,7 @@ mcp = FastMCP(
     "rag-retrieval",
     instructions="Agentic RAG tools for searching documents, routing queries, checking corpus statistics, and executing multi-hop searches.",
     transport_security=build_transport_security(),
+    log_level="WARNING",
 )
 
 # Global lazily-initialized RAG singletons
