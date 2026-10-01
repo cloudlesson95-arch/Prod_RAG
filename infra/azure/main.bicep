@@ -12,6 +12,8 @@ var appEnvName = 'env-${namingSuffix}'
 var logAnalyticsName = 'log-${namingSuffix}'
 var appInsightsName = 'appinsights-${namingSuffix}'
 var identityName = 'id-${namingSuffix}'
+var storageAccountName = 'st${namingSuffix}'
+var stateContainerName = 'rag-state'
 
 // 1. User-Assigned Managed Identity
 resource managedIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
@@ -84,7 +86,7 @@ resource appEnv 'Microsoft.App/managedEnvironments@2023-05-01' = {
   }
 }
 
-// 7. Container App (with scale-to-zero minReplicas: 0)
+// 7. Container App (scale-to-zero; single replica because the state snapshot has one writer)
 resource containerApp 'Microsoft.App/containerApps@2023-05-01' = {
   name: containerAppName
   location: location
@@ -142,13 +144,97 @@ resource containerApp 'Microsoft.App/containerApps@2023-05-01' = {
               name: 'MCP_DNS_REBINDING_PROTECTION'
               value: 'false'
             }
+            {
+              name: 'STATE_BACKEND'
+              value: 'azure_blob'
+            }
+            {
+              name: 'AZURE_STORAGE_ACCOUNT_URL'
+              value: storageAccount.properties.primaryEndpoints.blob
+            }
+            {
+              name: 'AZURE_STATE_CONTAINER'
+              value: stateContainerName
+            }
+            {
+              name: 'LOCAL_DIR'
+              value: '/tmp/state/.local'
+            }
+            {
+              name: 'DATA_DIR'
+              value: '/tmp/state/data'
+            }
           ]
         }
       ]
       scale: {
         minReplicas: 0
-        maxReplicas: 3
+        maxReplicas: 1
       }
+    }
+  }
+}
+
+// 8. Storage account for the state snapshot (Entra ID only: no account keys, no public blobs)
+resource storageAccount 'Microsoft.Storage/storageAccounts@2023-01-01' = {
+  name: storageAccountName
+  location: location
+  kind: 'StorageV2'
+  sku: {
+    name: 'Standard_LRS'
+  }
+  properties: {
+    minimumTlsVersion: 'TLS1_2'
+    supportsHttpsTrafficOnly: true
+    allowBlobPublicAccess: false
+    allowSharedKeyAccess: false
+  }
+}
+
+// Versioning keeps every previous snapshot, so a bad write can be rolled back
+resource blobService 'Microsoft.Storage/storageAccounts/blobServices@2023-01-01' = {
+  parent: storageAccount
+  name: 'default'
+  properties: {
+    isVersioningEnabled: true
+  }
+}
+
+resource stateContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-01-01' = {
+  parent: blobService
+  name: stateContainerName
+  properties: {
+    publicAccess: 'None'
+  }
+}
+
+// Old snapshot versions are deleted after 30 days, so storage doesn't grow with every write
+resource stateLifecycle 'Microsoft.Storage/storageAccounts/managementPolicies@2023-01-01' = {
+  parent: storageAccount
+  name: 'default'
+  properties: {
+    policy: {
+      rules: [
+        {
+          name: 'expire-old-snapshot-versions'
+          enabled: true
+          type: 'Lifecycle'
+          definition: {
+            actions: {
+              version: {
+                delete: {
+                  daysAfterCreationGreaterThan: 30
+                }
+              }
+            }
+            filters: {
+              blobTypes: [
+                'blockBlob'
+              ]
+            }
+          }
+        }
+      ]
     }
   }
 }
@@ -161,3 +247,5 @@ output containerAppUrl string = containerApp.properties.configuration.ingress.fq
 output containerAppName string = containerApp.name
 output managedIdentityPrincipalId string = managedIdentity.properties.principalId
 output managedIdentityId string = managedIdentity.id
+output storageAccountName string = storageAccount.name
+output stateContainerId string = stateContainer.id

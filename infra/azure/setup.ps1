@@ -28,8 +28,10 @@ $acrName = $deployJson.acrName.value
 $containerAppName = $deployJson.containerAppName.value
 $containerAppUrl = $deployJson.containerAppUrl.value
 $managedIdentityPrincipalId = $deployJson.managedIdentityPrincipalId.value
+$storageName = $deployJson.storageAccountName.value
+$stateContainerId = $deployJson.stateContainerId.value
 
-Write-Host "   Infrastructure deployed! Key Vault: $kvName | ACR: $acrName" -ForegroundColor Green
+Write-Host "   Infrastructure deployed! Key Vault: $kvName | ACR: $acrName | Storage: $storageName" -ForegroundColor Green
 
 Write-Host "3. Setting up RBAC permissions..." -ForegroundColor Cyan
 $kvId = (az keyvault show --name $kvName --query id -o tsv)
@@ -47,6 +49,10 @@ if (-not $currentUser) {
     $currentUser = (az account show --query user.name -o tsv)
 }
 az role assignment create --assignee $currentUser --role "Key Vault Secrets Officer" --scope $kvId 2>$null | Out-Null
+
+# Grant Managed Identity (the app) and current user (the state CLI) read/write access to the state snapshot container
+az role assignment create --assignee $managedIdentityPrincipalId --role "Storage Blob Data Contributor" --scope $stateContainerId 2>$null | Out-Null
+az role assignment create --assignee $currentUser --role "Storage Blob Data Contributor" --scope $stateContainerId 2>$null | Out-Null
 
 Write-Host "   RBAC permissions configured. Waiting 10s for Azure RBAC propagation..." -ForegroundColor Green
 Start-Sleep -Seconds 10
