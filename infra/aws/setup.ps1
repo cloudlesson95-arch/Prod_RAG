@@ -147,6 +147,67 @@ if (Test-AwsResourceExists -CmdArgs @("iam", "get-role", "--role-name", $lambdaR
 }
 $lambdaRoleArn = "arn:aws:iam::${awsAccountId}:role/$lambdaRoleName"
 
+# 4b. S3 bucket for the state snapshot, and Lambda access to it
+$stateBucket = "$AppName-state-$awsAccountId"
+Write-Host "`n4b. Ensuring S3 state bucket '$stateBucket' exists..." -ForegroundColor Cyan
+if (Test-AwsResourceExists -CmdArgs @("s3api", "head-bucket", "--bucket", $stateBucket)) {
+    Write-Host "   S3 bucket '$stateBucket' already exists." -ForegroundColor Green
+} else {
+    $createArgs = @("s3api", "create-bucket", "--bucket", $stateBucket, "--region", $Region)
+    if ($Region -ne "us-east-1") {
+        $createArgs += @("--create-bucket-configuration", "LocationConstraint=$Region")
+    }
+    Invoke-AwsCmd -CmdArgs $createArgs | Out-Null
+    Write-Host "   Created S3 bucket '$stateBucket'." -ForegroundColor Green
+}
+
+# Versioning keeps previous snapshots for rollback; public access stays blocked
+Invoke-AwsCmd -CmdArgs @("s3api", "put-bucket-versioning", "--bucket", $stateBucket, "--versioning-configuration", "Status=Enabled") | Out-Null
+Invoke-AwsCmd -CmdArgs @("s3api", "put-public-access-block", "--bucket", $stateBucket, "--public-access-block-configuration", "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true") | Out-Null
+
+$lifecycleJson = @{
+    Rules = @(
+        @{
+            ID = "expire-old-snapshot-versions"
+            Status = "Enabled"
+            Filter = @{ Prefix = "" }
+            NoncurrentVersionExpiration = @{ NoncurrentDays = 30 }
+        }
+    )
+} | ConvertTo-Json -Depth 5
+
+$stateAccessPolicy = @{
+    Version = "2012-10-17"
+    Statement = @(
+        @{
+            Effect = "Allow"
+            Action = @("s3:GetObject", "s3:PutObject")
+            Resource = "arn:aws:s3:::$stateBucket/*"
+        },
+        @{
+            # Without ListBucket, S3 answers 403 instead of 404 for a missing snapshot
+            Effect = "Allow"
+            Action = "s3:ListBucket"
+            Resource = "arn:aws:s3:::$stateBucket"
+        }
+    )
+} | ConvertTo-Json -Depth 5
+
+$tempLifecycle = [System.IO.Path]::GetTempFileName()
+$tempStatePolicy = [System.IO.Path]::GetTempFileName()
+try {
+    Write-JsonFileNoBOM -FilePath $tempLifecycle -JsonContent $lifecycleJson
+    Invoke-AwsCmd -CmdArgs @("s3api", "put-bucket-lifecycle-configuration", "--bucket", $stateBucket, "--lifecycle-configuration", "file://$tempLifecycle") | Out-Null
+
+    # Applied on every run: the role-creation branch above is skipped when the role already exists
+    Write-JsonFileNoBOM -FilePath $tempStatePolicy -JsonContent $stateAccessPolicy
+    Invoke-AwsCmd -CmdArgs @("iam", "put-role-policy", "--role-name", $lambdaRoleName, "--policy-name", "StateSnapshotAccess", "--policy-document", "file://$tempStatePolicy") | Out-Null
+    Write-Host "   Versioning, lifecycle and Lambda access configured for '$stateBucket'." -ForegroundColor Green
+} finally {
+    Remove-Item $tempLifecycle -ErrorAction SilentlyContinue
+    Remove-Item $tempStatePolicy -ErrorAction SilentlyContinue
+}
+
 # 4. GitHub Actions OIDC Federated Role
 Write-Host "`n5. Setting up GitHub Actions OIDC Federated Role..." -ForegroundColor Cyan
 $oidcProviderArn = "arn:aws:iam::${awsAccountId}:oidc-provider/token.actions.githubusercontent.com"
@@ -251,3 +312,4 @@ Write-Host "`nAdd the following VARIABLES (Settings -> Secrets and variables -> 
 Write-Host "AWS_REGION:            $Region"
 Write-Host "AWS_ECR_REPO:          $ecrUri"
 Write-Host "AWS_LAMBDA_ROLE_ARN:   $lambdaRoleArn"
+Write-Host "AWS_STATE_BUCKET:      $stateBucket"

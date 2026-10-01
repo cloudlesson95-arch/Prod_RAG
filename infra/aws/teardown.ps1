@@ -74,6 +74,16 @@ function Remove-IamRole {
     Write-Host "   Deleted IAM Role '$RoleName'." -ForegroundColor Green
 }
 
+# Helper function to write UTF-8 files WITHOUT Byte Order Mark (BOM)
+function Write-JsonFileNoBOM {
+    param(
+        [string]$FilePath,
+        [string]$JsonContent
+    )
+    $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+    [System.IO.File]::WriteAllText($FilePath, $JsonContent, $utf8NoBom)
+}
+
 Write-Host "1. Checking AWS CLI authentication..." -ForegroundColor Cyan
 $callerIdentityJson = Invoke-AwsCmd -CmdArgs @("sts", "get-caller-identity", "--output", "json")
 $callerIdentity = $callerIdentityJson | ConvertFrom-Json
@@ -83,11 +93,13 @@ Write-Host "   Authenticated to AWS Account ID: $awsAccountId (Region: $Region)"
 $lambdaRoleName = "LambdaExecutionRole-$AppName"
 $logGroupName = "/aws/lambda/$FunctionName"
 $oidcProviderArn = "arn:aws:iam::${awsAccountId}:oidc-provider/token.actions.githubusercontent.com"
+$stateBucket = "$AppName-state-$awsAccountId"
 
 Write-Host "`nThe following resources will be PERMANENTLY deleted:" -ForegroundColor Yellow
 Write-Host "   Lambda function + Function URL:  $FunctionName"
 Write-Host "   CloudWatch log group:            $logGroupName"
 Write-Host "   ECR repository (all images):     $EcrRepoName"
+Write-Host "   S3 state bucket (all versions):  $stateBucket"
 Write-Host "   Secrets Manager (no recovery):   $($SecretNames -join ', ')"
 Write-Host "   IAM roles:                       $lambdaRoleName, $GitHubRoleName"
 if ($DeleteOidcProvider) {
@@ -110,6 +122,27 @@ Invoke-AwsDelete -Description "log group '$logGroupName'" -CmdArgs @("logs", "de
 
 Write-Host "`n4. Deleting ECR repository and all its images..." -ForegroundColor Cyan
 Invoke-AwsDelete -Description "ECR repository '$EcrRepoName'" -CmdArgs @("ecr", "delete-repository", "--repository-name", $EcrRepoName, "--force", "--region", $Region)
+
+Write-Host "`n4b. Emptying and deleting the S3 state bucket (all snapshot versions)..." -ForegroundColor Cyan
+if (Test-AwsResourceExists -CmdArgs @("s3api", "head-bucket", "--bucket", $stateBucket)) {
+    # A versioned bucket can only be deleted once every object version and delete marker is gone
+    $listing = Invoke-AwsCmd -CmdArgs @("s3api", "list-object-versions", "--bucket", $stateBucket, "--output", "json") | ConvertFrom-Json
+    $toDelete = @(@($listing.Versions) + @($listing.DeleteMarkers) | Where-Object { $_ } | ForEach-Object { @{ Key = $_.Key; VersionId = $_.VersionId } })
+    for ($i = 0; $i -lt $toDelete.Count; $i += 1000) {  # delete-objects accepts at most 1000 per call
+        $batch = @{ Objects = @($toDelete[$i..([Math]::Min($i + 999, $toDelete.Count - 1))]); Quiet = $true } | ConvertTo-Json -Depth 4
+        $tempBatch = [System.IO.Path]::GetTempFileName()
+        try {
+            Write-JsonFileNoBOM -FilePath $tempBatch -JsonContent $batch
+            Invoke-AwsCmd -CmdArgs @("s3api", "delete-objects", "--bucket", $stateBucket, "--delete", "file://$tempBatch") | Out-Null
+        } finally {
+            Remove-Item $tempBatch -ErrorAction SilentlyContinue
+        }
+    }
+    Invoke-AwsCmd -CmdArgs @("s3api", "delete-bucket", "--bucket", $stateBucket, "--region", $Region) | Out-Null
+    Write-Host "   Deleted S3 bucket '$stateBucket' ($($toDelete.Count) object versions)." -ForegroundColor Green
+} else {
+    Write-Host "   S3 bucket '$stateBucket' not found, skipping." -ForegroundColor DarkGray
+}
 
 Write-Host "`n5. Deleting Secrets Manager secrets (immediately, without recovery window)..." -ForegroundColor Cyan
 foreach ($secretName in $SecretNames) {

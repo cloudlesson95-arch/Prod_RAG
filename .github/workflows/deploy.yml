@@ -148,9 +148,17 @@ jobs:
           docker push $ECR_LATEST
 
       - name: Deploy / Update AWS Lambda Container
+        env:
+          # One definition for both the update and the create branch below
+          LAMBDA_ENV: "Variables={SECRET_BACKEND=aws_secretsmanager,LOG_TO_FILE=false,LOG_TO_CONSOLE=true,HOME=/tmp,HF_HUB_OFFLINE=1,TRANSFORMERS_OFFLINE=1,AWS_LWA_ASYNC_INIT=true,MCP_DNS_REBINDING_PROTECTION=false,STATE_BACKEND=s3,S3_STATE_BUCKET=${{ vars.AWS_STATE_BUCKET }},LOCAL_DIR=/tmp/state/.local,DATA_DIR=/tmp/state/data}"
         run: |
           FUNCTION_NAME="ragprod-api"
           IMAGE_URI="${{ vars.AWS_ECR_REPO }}:${{ github.sha }}"
+
+          if [ -z "${{ vars.AWS_STATE_BUCKET }}" ]; then
+            echo "::error::GitHub variable AWS_STATE_BUCKET is not set (infra/aws/setup.ps1 prints it)"
+            exit 1
+          fi
 
           if aws lambda get-function --function-name $FUNCTION_NAME --region ${{ vars.AWS_REGION }} 2>/dev/null; then
             echo "Updating existing AWS Lambda function code..."
@@ -170,7 +178,7 @@ jobs:
               --region ${{ vars.AWS_REGION }} \
               --timeout 300 \
               --memory-size 3008 \
-              --environment "Variables={SECRET_BACKEND=aws_secretsmanager,LOG_TO_FILE=false,LOG_TO_CONSOLE=true,LOCAL_DIR=/tmp/.local,HOME=/tmp,HF_HUB_OFFLINE=1,TRANSFORMERS_OFFLINE=1,AWS_LWA_ASYNC_INIT=true,MCP_DNS_REBINDING_PROTECTION=false}"
+              --environment "$LAMBDA_ENV"
 
             echo "Waiting for Lambda configuration update to complete..."
             aws lambda wait function-updated \
@@ -183,7 +191,7 @@ jobs:
               --package-type Image \
               --code ImageUri=$IMAGE_URI \
               --role ${{ vars.AWS_LAMBDA_ROLE_ARN }} \
-              --environment "Variables={SECRET_BACKEND=aws_secretsmanager,LOG_TO_FILE=false,LOG_TO_CONSOLE=true,LOCAL_DIR=/tmp/.local,HOME=/tmp,HF_HUB_OFFLINE=1,TRANSFORMERS_OFFLINE=1,AWS_LWA_ASYNC_INIT=true,MCP_DNS_REBINDING_PROTECTION=false}" \
+              --environment "$LAMBDA_ENV" \
               --timeout 300 \
               --memory-size 3008 \
               --region ${{ vars.AWS_REGION }}
