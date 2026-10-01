@@ -1,4 +1,6 @@
 import abc
+import boto3
+from botocore.exceptions import ClientError
 
 from azure.core import MatchConditions
 from azure.core.exceptions import ResourceExistsError, ResourceModifiedError, ResourceNotFoundError
@@ -8,6 +10,7 @@ from azure.storage.blob import BlobServiceClient, StorageErrorCode
 from src.config import (
     STATE_BACKEND, STATE_SNAPSHOT_NAME,
     AZURE_STORAGE_ACCOUNT_URL, AZURE_STATE_CONTAINER, AZURE_STORAGE_CONNECTION_STRING,
+    S3_STATE_BUCKET, AWS_REGION,
 )
 from src.logging_config import setup_logging
 
@@ -110,6 +113,64 @@ class AzureBlobStateStore(StateStore):
         return result["etag"]
 
 
+class S3StateStore(StateStore):
+    """Snapshot stored as one S3 object; versions are the object's ETag.
+
+    Authenticates with the default AWS credential chain (the Lambda execution role,
+    or your AWS profile locally).
+    """
+
+    def __init__(self, bucket: str, key: str, region: str):
+        if not bucket:
+            raise ValueError("STATE_BACKEND=s3 needs S3_STATE_BUCKET.")
+        self._s3 = boto3.client("s3", region_name=region)
+        self._bucket = bucket
+        self._key = key
+
+    def download(self, dest_path: str) -> str | None:
+        try:
+            response = self._s3.get_object(Bucket=self._bucket, Key=self._key)
+        except ClientError as e:
+            if self._is_missing_object(e):
+                return None
+            raise
+        with open(dest_path, "wb") as f:
+            for chunk in response["Body"].iter_chunks(chunk_size=1024 * 1024):
+                f.write(chunk)
+        return response["ETag"]
+
+    def current_version(self) -> str | None:
+        try:
+            return self._s3.head_object(Bucket=self._bucket, Key=self._key)["ETag"]
+        except ClientError as e:
+            if self._is_missing_object(e):
+                return None
+            raise
+
+    def upload(self, src_path: str, expected_version: str | None) -> str:
+        condition = {"IfNoneMatch": "*"} if expected_version is None else {"IfMatch": expected_version}
+        with open(src_path, "rb") as data:
+            try:
+                response = self._s3.put_object(Bucket=self._bucket, Key=self._key, Body=data, **condition)
+            except ClientError as e:
+                # 412: the condition failed; 409: another conditional write to this key was in flight
+                if e.response.get("Error", {}).get("Code") in ("PreconditionFailed", "ConditionalRequestConflict"):
+                    raise SnapshotConflict(f"Snapshot changed since version {expected_version!r}") from e
+                raise
+        return response["ETag"]
+
+    def _is_missing_object(self, e: ClientError) -> bool:
+        """True only if the bucket exists and the snapshot object doesn't."""
+        code = e.response.get("Error", {}).get("Code")
+        if code == "NoSuchKey":
+            return True
+        if code in ("404", "NotFound"):
+            # HEAD responses have no body, so a missing bucket also looks like a plain 404.
+            self._s3.head_bucket(Bucket=self._bucket)  # raises if the bucket doesn't exist
+            return True
+        return False
+
+
 def get_state_store(backend: str = STATE_BACKEND) -> StateStore | None:
     """Return the configured StateStore, or None when state is local-only."""
     backend = backend.lower()
@@ -122,4 +183,7 @@ def get_state_store(backend: str = STATE_BACKEND) -> StateStore | None:
             account_url=AZURE_STORAGE_ACCOUNT_URL,
             connection_string=AZURE_STORAGE_CONNECTION_STRING,
         )
+    if backend == "s3":
+        return S3StateStore(bucket=S3_STATE_BUCKET, key=STATE_SNAPSHOT_NAME, region=AWS_REGION)
+
     raise ValueError(f"Unknown STATE_BACKEND '{backend}' (expected 'local', 'azure_blob' or 's3')")

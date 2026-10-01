@@ -1,12 +1,15 @@
 import os
 import uuid
+import boto3
+from botocore.exceptions import ClientError
 
 import pytest
 from azure.core.exceptions import ResourceNotFoundError
 from azure.storage.blob import BlobServiceClient
 
 from src.storage import state_store
-from src.storage.state_store import get_state_store, SnapshotConflict, AzureBlobStateStore
+from src.storage.state_store import get_state_store, SnapshotConflict, AzureBlobStateStore, S3StateStore
+
 
 AZURITE_CONNECTION_STRING = os.getenv("AZURITE_CONNECTION_STRING", "")
 needs_azurite = pytest.mark.skipif(not AZURITE_CONNECTION_STRING,
@@ -89,4 +92,39 @@ def test_azure_blob_missing_container_is_an_error_not_an_empty_store(tmp_path):
     with pytest.raises(ResourceNotFoundError):
         store.download(str(tmp_path / "out"))
     with pytest.raises(ResourceNotFoundError):
+        store.current_version()
+
+
+def test_s3_backend_requires_bucket(monkeypatch):
+    """Verify a missing bucket name fails at startup instead of at the first write."""
+    monkeypatch.setattr(state_store, "S3_STATE_BUCKET", "")
+    with pytest.raises(ValueError):
+        get_state_store("s3")
+
+
+@pytest.fixture
+def moto_bucket(monkeypatch):
+    """A bucket in moto's in-memory S3, with fake credentials so real AWS is never touched."""
+    moto = pytest.importorskip("moto")
+    monkeypatch.delenv("AWS_PROFILE", raising=False)
+    for name in ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN"):
+        monkeypatch.setenv(name, "testing")
+    monkeypatch.setenv("AWS_DEFAULT_REGION", "us-east-1")
+    with moto.mock_aws():
+        boto3.client("s3", region_name="us-east-1").create_bucket(Bucket="test-state")
+        yield "test-state"
+
+
+def test_s3_store_contract(moto_bucket, tmp_path):
+    """Verify the S3 backend honors the same contract as the fake and Azure."""
+    store = S3StateStore(bucket=moto_bucket, key="state.tar.gz", region="us-east-1")
+    check_store_contract(store, tmp_path)
+
+
+def test_s3_missing_bucket_is_an_error_not_an_empty_store(moto_bucket, tmp_path):
+    """Verify a wrong bucket name raises instead of looking like 'no snapshot yet'."""
+    store = S3StateStore(bucket="no-such-bucket", key="state.tar.gz", region="us-east-1")
+    with pytest.raises(ClientError):
+        store.download(str(tmp_path / "out"))
+    with pytest.raises(ClientError):
         store.current_version()
