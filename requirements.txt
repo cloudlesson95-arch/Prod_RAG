@@ -151,3 +151,5 @@ azure-keyvault-secrets>=4.8.0
 azure-storage-blob==12.30.3
 azure-monitor-opentelemetry>=1.4.0
 boto3==1.43.99
+pypdf==6.19.0
+python-multipart==0.0.32

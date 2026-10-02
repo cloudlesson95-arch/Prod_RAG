@@ -8,3 +8,4 @@ logs/
 *.log
 .plan.md
 data/ingested/
+inbox/
