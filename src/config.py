@@ -45,6 +45,8 @@ ROUTING_METHOD = os.getenv("ROUTING_METHOD", "classical")  # "llm", "classical"
 GENERATE_VISUALIZATION = True
 CLUSTERS_DIR = os.path.join(LOCAL_DIR, "clusters")
 CLASSIFIER_MODEL_PATH = os.path.join(CLUSTERS_DIR, "retrieval_classifier.joblib")
+# Corpus probe: a chunk at least this similar (cosine) to the query overrules the classifier's "no retrieval".
+CORPUS_PROBE_THRESHOLD = float(os.getenv("CORPUS_PROBE_THRESHOLD", "0.55"))
 
 ENABLE_SEMANTIC_CACHE = True
 CACHE_SIMILARITY_THRESHOLD = 0.95

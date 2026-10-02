@@ -3,7 +3,7 @@ from typing import Literal
 from src.config import (
     K_RETRIEVAL, K_CANDIDATES, MAX_RETRIES, EMBEDDING_LOCAL_MODEL, MAIN_LLM_MODEL,
     ROUTING_METHOD, ENABLE_SEMANTIC_CACHE, ENABLE_HYBRID_SEARCH, ENABLE_RERANKER,
-    ENABLE_MULTI_HOP
+    ENABLE_MULTI_HOP, CORPUS_PROBE_THRESHOLD
 )
 from src.core.utils import create_llm
 from src.retrieval.semantic_cache import check_cache, add_to_cache
@@ -123,14 +123,26 @@ def answer_question(question: str, router, vectorstore, answer_llm, max_retries:
     if ROUTING_METHOD == "classical":
         from src.routing.classifier import predict_needs_retrieval_with_confidence
         from src.routing.clustering import predict_source
+        from src.routing.corpus_probe import probe_corpus
 
         query_embedding = vectorstore._embedding_function.embed_query(question)
 
         # Decision Point 1: Needs retrieval? (classifier)
         needs_retrieval, confidence = predict_needs_retrieval_with_confidence(query_embedding)
         logger.info(f"[Classical Router]: Retrieval decision={needs_retrieval} (Confidence: {confidence:.2f})")
+
+        # Decision Point 1b: the classifier never sees the corpus, so a close enough chunk overrules its "no"
         if not needs_retrieval:
-            logger.info("[Classical Router]: No retrieval needed (Logistic Regression)")
+            probe_source, similarity = probe_corpus(query_embedding, vectorstore)
+            if similarity >= CORPUS_PROBE_THRESHOLD:
+                needs_retrieval = True
+                logger.info(f"[Corpus Probe]: Closest chunk ('{probe_source}') at {similarity:.2f} >= "
+                            f"{CORPUS_PROBE_THRESHOLD:.2f}; retrieving anyway")
+            else:
+                logger.info(f"[Corpus Probe]: Closest chunk at {similarity:.2f} < {CORPUS_PROBE_THRESHOLD:.2f}")
+
+        if not needs_retrieval:
+            logger.info("[Classical Router]: No retrieval needed")
             answer = answer_llm.invoke(question).content
         else:
             # Decision Point 2: Nearest source centroid (clustering)
