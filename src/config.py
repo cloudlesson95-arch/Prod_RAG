@@ -98,3 +98,10 @@ S3_STATE_BUCKET = os.getenv("S3_STATE_BUCKET", "")
 # MCP server (HTTP transport). The SDK's DNS rebinding protection only accepts localhost Host headers,
 # which is right for a local server; public deployments set this to false (main.bicep, deploy.yml).
 MCP_DNS_REBINDING_PROTECTION = os.getenv("MCP_DNS_REBINDING_PROTECTION", "true").lower() in ("1", "true", "yes")
+
+# Demo sandbox: public single-document Q&A, held in memory per instance and never persisted
+DEMO_MAX_FILE_BYTES = 2 * 1024 * 1024
+DEMO_MAX_TEXT_CHARS = 200_000
+DEMO_TTL_SECONDS = 30 * 60  # idle time before a demo document is dropped
+DEMO_MAX_DOCS = 20
+DEMO_RATE_LIMIT_PER_MINUTE = 5
