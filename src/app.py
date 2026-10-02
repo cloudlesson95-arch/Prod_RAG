@@ -16,6 +16,12 @@ def main():
     index_parser = subparsers.add_parser("index", help="Build/update document index")
     index_parser.add_argument("--rebuild", action="store_true", help="Force rebuild of index")
     
+    # Batch ingestion command
+    batch_parser = subparsers.add_parser("ingest-batch",
+                                         help="Index every file in an inbox folder and publish one snapshot")
+    batch_parser.add_argument("--dir", dest="inbox_dir", default="inbox",
+                              help="Folder with .txt, .md and .pdf files (default: inbox)")
+
     # Query command  
     query_parser = subparsers.add_parser("query", help="Query the RAG system")
     query_parser.add_argument("question", help="Question to ask")
@@ -62,6 +68,37 @@ def main():
                   "with the latest snapshot, so save any new files first, then repeat your change.")
             sys.exit(1)
         logger.info("Index sync and ML model update completed.")
+
+    elif args.command == "ingest-batch":
+        import sys
+        from src.config import STATE_BACKEND
+        from src.ingestion.batch import ingest_batch
+        from src.storage.state_store import SnapshotConflict
+        from src.storage.state_sync import StateReadOnlyError
+        try:
+            result = ingest_batch(args.inbox_dir)
+        except (FileNotFoundError, StateReadOnlyError) as e:
+            print(f"Batch not ingested: {e}")
+            sys.exit(1)
+        except SnapshotConflict as e:
+            print(f"Batch not published: {e}.\n"
+                  "Another writer published while this batch ran. Run ingest-batch again; it starts from the latest snapshot.")
+            sys.exit(1)
+
+        for status, names in (("added", result.added), ("modified", result.modified), ("unchanged", result.unchanged)):
+            for name in names:
+                print(f"  {status:<10} {name}")
+        for name, reason in result.failed:
+            print(f"  {'FAILED':<10} {name}: {reason}")
+
+        if not result.published:
+            print("Nothing new to index.")
+        elif STATE_BACKEND.lower() == "local":
+            print(f"Indexed locally ({len(result.changed_sources)} sources changed); STATE_BACKEND=local publishes nothing.")
+        else:
+            print(f"Published snapshot {result.state_version} ({len(result.changed_sources)} sources changed).\n"
+                  "Running apps keep serving the previous snapshot until restarted (README: 'Add documents').")
+        sys.exit(1 if result.failed else 0)
 
     elif args.command == "query":
         from src.core.vectorstore import create_or_get_vectorstore
