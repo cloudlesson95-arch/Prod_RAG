@@ -144,12 +144,14 @@ $ACCOUNT = aws sts get-caller-identity --query Account --output text
 $env:STATE_BACKEND = "s3"; $env:S3_STATE_BUCKET = "ragprod-state-$ACCOUNT"; $env:AWS_REGION = "us-east-1"
 $env:LOCAL_DIR = "$env:TEMP\rag-batch-aws\.local"; $env:DATA_DIR = "$env:TEMP\rag-batch-aws\data"
 python -m src.app ingest-batch
-aws lambda update-function-configuration --function-name ragprod-api --description "batch $(Get-Date -Format s)" --region us-east-1
+aws lambda update-function-configuration --function-name ragprod-api --description "batch $(Get-Date -Format s)" --region us-east-1 | Out-Null
+aws lambda wait function-updated --function-name ragprod-api --region us-east-1
 
-Remove-Item Env:STATE_BACKEND, Env:S3_STATE_BUCKET, Env:LOCAL_DIR, Env:DATA_DIR
+Remove-Item Env:STATE_BACKEND, Env:S3_STATE_BUCKET, Env:AWS_REGION, Env:LOCAL_DIR, Env:DATA_DIR
 ```
 
-`ingest-batch` restores the latest snapshot into the scratch folders, reports files it can't read (exit code 1), embeds only new or changed files and publishes one snapshot; running it again with the same inbox publishes nothing. Running apps keep the previous snapshot until restarted, which is what the last command of each block does (on Lambda, any configuration change retires the warm instances). Run `live-eval` afterwards, since new documents can change routing. To remove a document, `state pull` into scratch folders, delete it from `DATA_DIR/ingested/batch/`, run `index` (it publishes), then restart the app. Never point a batch at the folders of a running local server: the restore replaces the index under it.
+`ingest-batch` restores the latest snapshot into the scratch folders, reports files it can't read (exit code 1), embeds only new or changed files and publishes one snapshot; running it again with the same inbox publishes nothing. Running apps keep the previous snapshot until restarted, which is what the restart commands do: on Lambda any configuration change retires the warm instances, and the Azure revision restart takes about a minute after it reports success. Check `/health` (`state_version`) and then `/query`, since `/health` doesn't load the router models. Run `live-eval` afterwards, since new documents can change routing. To remove a document, `state pull` into scratch folders, delete it from `DATA_DIR/ingested/batch/`, run `index` (it publishes), then restart the app. Never point a batch at the folders of a running local server: the restore replaces the index under it.
+
 Run it from a venv synced with the lock (see Local setup): `ingest-batch` and `index` refuse to publish when scikit-learn, numpy, joblib or chromadb differ from `requirements.txt`, because the snapshot carries their file formats.
 
 ### Teardown
@@ -166,6 +168,7 @@ Disable the Deploy workflow first (otherwise the next push re-creates the Lambda
 - Demo documents live in one instance's memory: a restart, scale-to-zero or 30 idle minutes removes them, and on Lambda a follow-up question can reach another instance and get a 404 (upload again). The 2 MB upload limit is checked after the request body has arrived; the platform caps the request itself (6 MB on Lambda).
 - The demo's `groundedness_score` is the similarity between the answer and the retrieved text: it flags answers that drift off topic, not wrong facts, and short correct answers score low.
 - Routing to new documents: in measurements the corpus probe made 7 of 11 questions about new documents retrievable; borderline wordings still go to the LLM without retrieval. The MCP `route_query` tool reports only the classifier's decision, so it can disagree with `/query`. With `ROUTING_METHOD=llm`, ingested documents are unreachable (the LLM router's source list is fixed).
+- On Groq's free tier (8,000 tokens per minute for `gpt-oss-20b`), bursts of expensive questions, such as a `live-eval` run, can hit the rate limit. The API then answers 500 instead of retrying.
 - The semantic cache is per instance and starts empty after every deploy (by design).
 - `live-eval` stores its results in the `rag.db` of the machine that runs it, not in the deployed state.
 - Every deploy pushes a multi-GB image to both registries; delete old tags periodically.
