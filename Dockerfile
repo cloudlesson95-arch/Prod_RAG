@@ -1,4 +1,4 @@
-FROM python:3.10-slim
+FROM python:3.13-slim
 
 # AWS Lambda Web Adapter
 COPY --from=public.ecr.aws/awsguru/aws-lambda-adapter:0.8.4 /lambda-adapter /opt/extensions/lambda-adapter
@@ -14,8 +14,9 @@ ENV PYTHONIOENCODING=utf-8
 ENV HF_HOME=/app/.cache/huggingface
 
 COPY requirements.txt .
-# Install CPU-only PyTorch (avoids downloading ~6GB of CUDA binaries)
-RUN pip install --no-cache-dir torch --extra-index-url https://download.pytorch.org/whl/cpu
+# requirements.txt is a lock that pins CPU-only PyTorch (torch==<version>+cpu, served from PyTorch's index).
+# Lambda and Container Apps (consumption plan) have no GPUs, so CUDA builds would only add several GB to the
+# image and push Lambda toward its 10 GB image limit.
 RUN pip install --no-cache-dir --extra-index-url https://download.pytorch.org/whl/cpu -r requirements.txt
 
 COPY src/ ./src/

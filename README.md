@@ -49,11 +49,11 @@ Same image in both clouds: FastAPI (/health, /query, /demo/documents, /docs) + M
 
 ## Local setup
 
-Python 3.10 matches the Docker image, and `requirements.txt` is pinned for it. On a newer Python, install `requirements_clean.txt` instead.
+`requirements.txt` is a lock file for Python 3.13 that the image, CI and your local venv all install, so everyone runs the same library versions. That matters beyond tidiness: state snapshots carry pickled router models and a Chroma index, which only load with the versions that wrote them. Install [uv](https://docs.astral.sh/uv/), then:
 
 ```powershell
-python -m venv .venv; .venv\Scripts\Activate.ps1
-pip install -r requirements.txt
+uv venv --seed --python 3.13 .venv; .venv\Scripts\Activate.ps1
+uv pip sync requirements.txt requirements-dev.txt --torch-backend cpu
 python -m src.app set-secret GROQ_API_KEY       # stored in the OS keyring; or put the keys in .env
 python -m src.app set-secret GOOGLE_API_KEY
 python -m src.app index                          # builds the index and the router models
@@ -62,13 +62,15 @@ python -m src.app serve                          # http://localhost:8000/docs
 
 Other commands: `query "<question>"`, `evaluate`, `history`, `live-eval --target-url <url>`, `ingest-batch [--dir inbox]`, `state status`, `state pull`, `get-secret <name>`.
 
+To change dependencies, edit `requirements.in` (or `requirements-dev.in`), recompile with the command in its header, then run the `uv pip sync` line again. Recompiling keeps the existing pins unless you pass `--upgrade-package <name>`.
+
 ### Test
 
 ```powershell
 python -m pytest tests/ -v
 ```
 
-The Azure Blob tests also run when `AZURITE_CONNECTION_STRING` points at a running [Azurite](https://learn.microsoft.com/azure/storage/common/storage-use-azurite) emulator, and the S3 tests when `moto[s3]` is installed; otherwise they are skipped.
+The Azure Blob tests also run when `AZURITE_CONNECTION_STRING` points at a running [Azurite](https://learn.microsoft.com/azure/storage/common/storage-use-azurite) emulator; otherwise they are skipped.
 
 To run the image the way Lambda does (read-only filesystem, non-root user; `.env` holds the API keys):
 

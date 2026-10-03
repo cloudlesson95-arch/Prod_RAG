@@ -1,3 +1,5 @@
+# Direct dependencies with loose version ranges. requirements.txt is the lock compiled from this file:
+#   uv pip compile requirements.in --universal --python-version 3.13 --torch-backend cpu -o requirements.txt
 langchain
 langchain-community
 langchain-google-genai
