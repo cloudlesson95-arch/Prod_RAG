@@ -150,6 +150,7 @@ Remove-Item Env:STATE_BACKEND, Env:S3_STATE_BUCKET, Env:LOCAL_DIR, Env:DATA_DIR
 ```
 
 `ingest-batch` restores the latest snapshot into the scratch folders, reports files it can't read (exit code 1), embeds only new or changed files and publishes one snapshot; running it again with the same inbox publishes nothing. Running apps keep the previous snapshot until restarted, which is what the last command of each block does (on Lambda, any configuration change retires the warm instances). Run `live-eval` afterwards, since new documents can change routing. To remove a document, `state pull` into scratch folders, delete it from `DATA_DIR/ingested/batch/`, run `index` (it publishes), then restart the app. Never point a batch at the folders of a running local server: the restore replaces the index under it.
+Run it from a venv synced with the lock (see Local setup): `ingest-batch` and `index` refuse to publish when scikit-learn, numpy, joblib or chromadb differ from `requirements.txt`, because the snapshot carries their file formats.
 
 ### Teardown
 

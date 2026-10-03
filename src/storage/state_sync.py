@@ -1,11 +1,13 @@
 import os
+import re
 import shutil
 import tarfile
 import tempfile
 import threading
 from contextlib import contextmanager
+from importlib.metadata import PackageNotFoundError, version
 
-from src.config import DATA_DIR, LOCAL_DIR, SEED_DATA_DIR, SEED_LOCAL_DIR
+from src.config import BASE_DIR, DATA_DIR, LOCAL_DIR, SEED_DATA_DIR, SEED_LOCAL_DIR
 from src.logging_config import setup_logging
 from src.storage.state_store import StateStore, SnapshotConflict, get_state_store
 
@@ -170,6 +172,43 @@ def _restore_or_create(store: StateStore) -> str:
             return version
 
 
+# Packages whose file formats travel inside the snapshot: the pickled router models (scikit-learn, numpy, joblib)
+# and the Chroma index (chromadb). A writer with other versions publishes files the app may not be able to load.
+SNAPSHOT_FORMAT_PACKAGES = ("scikit-learn", "numpy", "joblib", "chromadb")
+LOCK_FILE = os.path.join(BASE_DIR, "requirements.txt")
+
+
+def _normalize(name: str) -> str:
+    """Normalize a package name the way pip does (PEP 503), e.g. 'Scikit_Learn' -> 'scikit-learn'."""
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def lock_mismatches(lock_file: str = LOCK_FILE, packages: tuple[str, ...] = SNAPSHOT_FORMAT_PACKAGES) -> list[str]:
+    """List snapshot-format packages whose installed version differs from their pin in the lock file.
+
+    Reads `name==version` lines and ignores comments and environment markers. If a package were ever
+    pinned per platform (several lines with markers), the last line would win.
+    """
+    pins = {}
+    if os.path.exists(lock_file):
+        with open(lock_file, "r", encoding="utf-8") as f:
+            for line in f:
+                match = re.match(r"^([A-Za-z0-9_.-]+)==([^\s;]+)", line)
+                if match:
+                    pins[_normalize(match.group(1))] = match.group(2)
+
+    mismatches = []
+    for package in packages:
+        pinned = pins.get(_normalize(package))
+        try:
+            installed = version(package)
+        except PackageNotFoundError:
+            installed = None
+        if pinned is None or installed != pinned:
+            mismatches.append(f"{package} {installed or 'not installed'} (lock: {pinned or 'not pinned'})")
+    return mismatches
+
+
 @contextmanager
 def state_write():
     """Run a block that changes persistent state, then publish it as a new snapshot.
@@ -187,6 +226,14 @@ def state_write():
         if store is None:
             yield
             return
+
+        mismatches = lock_mismatches()
+        if mismatches:
+            raise StateReadOnlyError(
+                "this environment doesn't match requirements.txt, so the app might not be able to load "
+                f"the snapshot it would publish: {', '.join(mismatches)}. "
+                "Sync it with: uv pip sync requirements.txt requirements-dev.txt --torch-backend cpu"
+            )
 
         base_version = read_local_version(LOCAL_DIR)
         stored_version = store.current_version()

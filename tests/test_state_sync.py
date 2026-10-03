@@ -1,5 +1,6 @@
 import tarfile
 from pathlib import Path
+from importlib.metadata import PackageNotFoundError
 
 import pytest
 from langchain_chroma import Chroma
@@ -118,6 +119,7 @@ def state_env(tmp_path, monkeypatch, fake_store):
     monkeypatch.setattr(state_sync, "LOCAL_DIR", str(local))
     monkeypatch.setattr(state_sync, "get_state_store", lambda: fake_store)
     monkeypatch.setattr(state_sync, "_read_only_reason", None)
+    monkeypatch.setattr(state_sync, "lock_mismatches", lambda: [])
     return data, local, fake_store
 
 
@@ -255,3 +257,60 @@ def test_seed_from_image_ignores_leftovers_in_data_dir(tmp_path):
     assert seed_from_image(str(data), str(local), seed_data, seed_local) is True
     assert (data / "cat-facts.txt").exists()
     assert (data / "ingested" / "leftover.txt").exists()
+
+
+def test_lock_mismatches_compares_installed_versions_with_pins(tmp_path, monkeypatch):
+    """Verify pins are read from name==version lines (markers and comments ignored) and compared exactly."""
+    lock = tmp_path / "requirements.txt"
+    lock.write_text(
+        "numpy==2.5.3\n"
+        "    # via scikit-learn\n"
+        "scikit-learn==1.9.1\n"
+        "torch==2.14.0+cpu ; sys_platform != 'darwin'\n"
+    )
+    installed = {"numpy": "2.5.3", "scikit-learn": "1.7.2"}
+
+    def fake_version(name):
+        if name not in installed:
+            raise PackageNotFoundError(name)
+        return installed[name]
+
+    monkeypatch.setattr(state_sync, "version", fake_version)
+
+    assert state_sync.lock_mismatches(str(lock), ("numpy", "scikit-learn", "chromadb")) == [
+        "scikit-learn 1.7.2 (lock: 1.9.1)",
+        "chromadb not installed (lock: not pinned)",
+    ]
+
+
+def test_state_write_refuses_to_publish_from_unsynced_environment(state_env, monkeypatch):
+    """Verify a version mismatch stops the write before the body runs, without making the instance read-only."""
+    data, local, store = state_env
+    initialize_state()
+    monkeypatch.setattr(state_sync, "lock_mismatches", lambda: ["scikit-learn 1.7.2 (lock: 1.9.1)"])
+
+    ran = False
+    with pytest.raises(StateReadOnlyError, match="scikit-learn 1.7.2"):
+        with state_write():
+            ran = True
+
+    assert not ran
+    assert store.uploads == 1  # only the first-boot seed
+    assert read_only_reason() is None
+
+
+def test_local_backend_skips_the_lock_check(state_env, monkeypatch):
+    """Verify local development (no remote store) never needs a synced environment."""
+    data, local, store = state_env
+    monkeypatch.setattr(state_sync, "get_state_store", lambda: None)
+    initialize_state()  # seeds the empty working dirs, as at app startup
+
+    def must_not_run():
+        raise AssertionError("lock check ran for the local backend")
+
+    monkeypatch.setattr(state_sync, "lock_mismatches", must_not_run)
+
+    with state_write():
+        (data / "ingested" / "doc.txt").write_text("hello")
+    assert (data / "ingested" / "doc.txt").exists()
+    assert store.uploads == 0

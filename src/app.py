@@ -60,8 +60,12 @@ def main():
         import sys
         from src.core.indexing import reindex
         from src.storage.state_store import SnapshotConflict
+        from src.storage.state_sync import StateReadOnlyError
         try:
             reindex(force_rebuild=args.rebuild)
+        except StateReadOnlyError as e:
+            print(f"Index not published: {e}")
+            sys.exit(1)
         except SnapshotConflict as e:
             print(f"Index not published: {e}.\n"
                   "Your working copy is out of date. 'python -m src.app state pull' replaces DATA_DIR "
