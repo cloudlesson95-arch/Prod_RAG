@@ -47,6 +47,9 @@ CLUSTERS_DIR = os.path.join(LOCAL_DIR, "clusters")
 CLASSIFIER_MODEL_PATH = os.path.join(CLUSTERS_DIR, "retrieval_classifier.joblib")
 # Corpus probe: a chunk at least this similar (cosine) to the query overrules the classifier's "no retrieval".
 CORPUS_PROBE_THRESHOLD = float(os.getenv("CORPUS_PROBE_THRESHOLD", "0.55"))
+# Generated questions: ingest-batch has the LLM write this many Q/A pairs per new or changed document
+QUESTIONS_PER_DOC = 5
+QUESTION_GEN_PAUSE_SECONDS = float(os.getenv("QUESTION_GEN_PAUSE_SECONDS", "0"))  # raise if the LLM's rate limit bites
 
 ENABLE_SEMANTIC_CACHE = True
 CACHE_SIMILARITY_THRESHOLD = 0.95
