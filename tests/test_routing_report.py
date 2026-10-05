@@ -1,0 +1,61 @@
+import json
+import os
+from types import SimpleNamespace
+
+from src.config import EVAL_QUESTIONS_PATH, ROUTING_PROBE_PATH, SEED_DATA_DIR
+from src.evaluation import routing_report
+from src.evaluation.evaluator import load_questions
+from src.routing.classifier import NON_RETRIEVAL_DATA
+from src.routing.router import RouteResult
+
+
+def test_benchmark_sources_name_real_seed_files():
+    """Verify every benchmark source_doc is 'general' or a file in data/: the routing checks compare it to real sources."""
+    seed_files = set(os.listdir(SEED_DATA_DIR))
+    for q in load_questions(EVAL_QUESTIONS_PATH):
+        assert q["source_doc"] == "general" or q["source_doc"] in seed_files, q["source_doc"]
+
+
+def test_probe_fixture_expectations_and_no_overlap_with_training():
+    """Verify new-doc questions name a batch source, and off-corpus questions expect no retrieval and are never training negatives."""
+    with open(ROUTING_PROBE_PATH, "r", encoding="utf-8") as f:
+        probe = json.load(f)
+    assert all(q["source_doc"].startswith("ingested/batch/") for q in probe["new_docs"])
+    assert all("source_doc" not in q for q in probe["off_corpus"])
+    negatives = {text.lower() for text, _ in NON_RETRIEVAL_DATA}
+    assert not negatives & {q["query"].lower() for q in probe["off_corpus"]}
+
+
+def test_general_benchmark_question_expects_no_retrieval(tmp_path):
+    """Verify 'general' benchmark questions and fixture questions without a source expect no retrieval."""
+    questions, probe = tmp_path / "questions.json", tmp_path / "probe.json"
+    questions.write_text(json.dumps([{"query": "2 + 2?", "source_doc": "general"},
+                                     {"query": "Cats?", "source_doc": "cat-facts.txt"}]), encoding="utf-8")
+    probe.write_text(json.dumps({"off_corpus": [{"query": "Capital of Peru?"}]}), encoding="utf-8")
+
+    assert routing_report.load_probe_questions(str(questions), str(probe)) == [
+        ("benchmark", "2 + 2?", None), ("benchmark", "Cats?", "cat-facts.txt"), ("off_corpus", "Capital of Peru?", None),
+    ]
+
+
+def test_rows_are_scored_against_their_expectation(monkeypatch):
+    """Verify right source, wrong source and wrong retrieval are each scored and counted correctly."""
+    routes = {
+        "Cats?": RouteResult(True, "cat-facts.txt", 0.61, None, "classifier"),
+        "Quokkas?": RouteResult(True, "cat-facts.txt", 0.54, 0.70, "probe"),
+        "Capital of Peru?": RouteResult(True, "fictional_text.txt", 0.40, 0.60, "probe"),
+        "Hello!": RouteResult(False, "none", 0.80, 0.20, "no_retrieval"),
+    }
+    monkeypatch.setattr(routing_report, "decide_route", lambda emb, vs: routes[emb])
+    vectorstore = SimpleNamespace(_embedding_function=SimpleNamespace(embed_query=lambda text: text))
+    items = [("benchmark", "Cats?", "cat-facts.txt"), ("new_docs", "Quokkas?", "ingested/batch/quokkas.md"),
+             ("off_corpus", "Capital of Peru?", None), ("off_corpus", "Hello!", None)]
+
+    rows = routing_report.run_routing_report(vectorstore, items)
+
+    assert [row.ok for row in rows] == [True, False, False, True]
+    summary = routing_report.summarize(rows)
+    assert summary["new_docs"] == {"questions": 1, "classifier_yes": 0, "probe_overruled": 1, "expect_retrieval": 1,
+                                   "reached": 1, "right_source": 0, "expect_none": 0, "wrongly_retrieved": 0}
+    assert (summary["off_corpus"]["expect_none"], summary["off_corpus"]["wrongly_retrieved"]) == (2, 1)
+    assert "[expected ingested/batch/quokkas.md]" in routing_report.format_report(rows)

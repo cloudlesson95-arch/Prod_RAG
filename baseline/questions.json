@@ -49,7 +49,7 @@
   },
   {
     "id": 7,
-    "source_doc": "pydantic_llms-full.txt",
+    "source_doc": "pydantic.llms-full.txt",
     "query": "What is the default token_threshold for AnthropicCompaction, and what's the minimum allowed value?",
     "expected_context": "token_threshold: int, Default: 150000 — Compact when input tokens exceed this threshold. Minimum 50,000.",
     "expected_answer": "Default 150,000; minimum allowed is 50,000.",
@@ -57,7 +57,7 @@
   },
   {
     "id": 8,
-    "source_doc": "pydantic_llms-full.txt",
+    "source_doc": "pydantic.llms-full.txt",
     "query": "What does ALLOW_MODEL_REQUESTS default to?",
     "expected_context": "ALLOW_MODEL_REQUESTS ... Default: True",
     "expected_answer": "True.",
@@ -65,7 +65,7 @@
   },
   {
     "id": 9,
-    "source_doc": "pydantic_llms-full.txt",
+    "source_doc": "pydantic.llms-full.txt",
     "query": "What does anthropic_cache_messages do, and how is that different from anthropic_cache?",
     "expected_context": "anthropic_cache_messages — This is an alternative to anthropic_cache for Anthropic-compatible gateways and proxies that accept the Anthropic message format but don't support the top-level automatic caching parameter... Cannot be combined with anthropic_cache. vs. anthropic_cache — Enable prompt caching for multi-turn conversations. Passes a top-level cache_control parameter...",
     "expected_answer": "anthropic_cache_messages adds cache_control to the last message block specifically, as a gateway/proxy-compatible alternative to the top-level anthropic_cache setting — the two are mutually exclusive.",

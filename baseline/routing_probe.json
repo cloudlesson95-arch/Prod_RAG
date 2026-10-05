@@ -1,0 +1,37 @@
+{
+  "new_docs": [
+    {"query": "Where do quokkas live in the wild?", "source_doc": "ingested/batch/quokkas.md"},
+    {"query": "What is the scientific name of the quokka?", "source_doc": "ingested/batch/quokkas.md"},
+    {"query": "How much does an adult quokka weigh?", "source_doc": "ingested/batch/quokkas.md"},
+    {"query": "Which island near Perth has the largest quokka population?", "source_doc": "ingested/batch/quokkas.md"},
+    {"query": "Why did Willem de Vlamingh name Rottnest Island after rats?", "source_doc": "ingested/batch/quokkas.md"},
+    {"query": "What do quokkas eat?", "source_doc": "ingested/batch/quokkas.md"},
+    {"query": "How long does a quokka joey stay in the pouch?", "source_doc": "ingested/batch/quokkas.md"},
+    {"query": "What is the conservation status of the quokka?", "source_doc": "ingested/batch/quokkas.md"},
+    {"query": "Is it legal to feed quokkas on Rottnest Island?", "source_doc": "ingested/batch/quokkas.md"},
+    {"query": "Why is the quokka called the happiest animal in the world?", "source_doc": "ingested/batch/quokkas.md"},
+    {"query": "Which small marsupial poses for tourist selfies off the coast of Western Australia?", "source_doc": "ingested/batch/quokkas.md"}
+  ],
+  "off_corpus": [
+    {"query": "What is the capital of Japan?"},
+    {"query": "Who painted the Mona Lisa?"},
+    {"query": "In which year did the Berlin Wall fall?"},
+    {"query": "What is the boiling point of water in Fahrenheit?"},
+    {"query": "Who wrote Pride and Prejudice?"},
+    {"query": "How many players are on a soccer team?"},
+    {"query": "What is the largest ocean on Earth?"},
+    {"query": "What is the chemical symbol for gold?"},
+    {"query": "How do I make scrambled eggs?"},
+    {"query": "What is the tallest mountain in Africa?"},
+    {"query": "Who was the first person to walk on the Moon?"},
+    {"query": "What is the square root of 144?"},
+    {"query": "Which planet is closest to the Sun?"},
+    {"query": "What language is spoken in Brazil?"},
+    {"query": "Can you suggest a name for my new bakery?"},
+    {"query": "Write a short poem about autumn."},
+    {"query": "Hey, what's up?"},
+    {"query": "What does the word serendipity mean?"},
+    {"query": "How many continents are there?"},
+    {"query": "What is the speed of light?"}
+  ]
+}

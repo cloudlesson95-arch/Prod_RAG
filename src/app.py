@@ -54,7 +54,13 @@ def main():
     state_parser.add_argument("action", choices=["status", "pull"],
                               help="status: show versions; pull: restore the latest snapshot into the working dirs")
 
-    args = parser.parse_args() 
+    # Routing report command
+    routing_parser = subparsers.add_parser("routing-report",
+                                           help="Show how the router decides on the benchmark and probe questions (no LLM calls)")
+    routing_parser.add_argument("--probe-file", default=None,
+                                help="Question groups to route (default: baseline/routing_probe.json)")
+
+    args = parser.parse_args()
 
     if args.command == "index":
         import sys
@@ -186,7 +192,17 @@ def main():
         print(f"Local dir:      {LOCAL_DIR}")
         print(f"Local version:  {read_local_version() or '-'}")
         print(f"Stored version: {stored}")
-            
+
+    elif args.command == "routing-report":
+        import logging
+        from src.config import ROUTING_PROBE_PATH
+        from src.core.vectorstore import create_or_get_vectorstore
+        from src.evaluation.routing_report import format_report, load_probe_questions, run_routing_report
+        # One table instead of 3-4 router log lines per question (set after the import, which configures the logger)
+        logging.getLogger("src.routing.router").setLevel(logging.WARNING)
+        items = load_probe_questions(probe_path=args.probe_file or ROUTING_PROBE_PATH)
+        print(format_report(run_routing_report(create_or_get_vectorstore(), items)))
+
     else:
         parser.print_help()
 

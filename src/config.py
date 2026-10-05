@@ -60,6 +60,7 @@ PREFERRED_MODELS = {
 
 # Baseline configuration
 EVAL_QUESTIONS_PATH = "baseline/questions.json"
+ROUTING_PROBE_PATH = "baseline/routing_probe.json"  # routing-report question groups (no expected answers)
 
 DB_PATH = os.path.join(LOCAL_DIR, "rag.db")
 
