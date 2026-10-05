@@ -22,7 +22,14 @@ def main():
     batch_parser.add_argument("--dir", dest="inbox_dir", default="inbox",
                               help="Folder with .txt, .md and .pdf files (default: inbox)")
 
-    # Query command  
+    # Release-notes collector command
+    collect_parser = subparsers.add_parser("collect-releases",
+                                           help="Write a GitHub repo's newest releases into one inbox file for ingest-batch")
+    collect_parser.add_argument("--repo", default="pydantic/pydantic-ai", help="owner/name (default: pydantic/pydantic-ai)")
+    collect_parser.add_argument("--limit", type=int, default=10, help="Newest published releases to keep (default: 10)")
+    collect_parser.add_argument("--dir", dest="inbox_dir", default="inbox", help="Inbox folder (default: inbox)")
+
+    # Query command
     query_parser = subparsers.add_parser("query", help="Query the RAG system")
     query_parser.add_argument("question", help="Question to ask")
     
@@ -109,6 +116,19 @@ def main():
             print(f"Published snapshot {result.state_version} ({len(result.changed_sources)} sources changed).\n"
                   "Running apps keep serving the previous snapshot until restarted (README: 'Add documents').")
         sys.exit(1 if result.failed else 0)
+
+    elif args.command == "collect-releases":
+        import sys
+        import requests
+        from src.collectors.github_releases import collect_releases
+        from src.secrets import get_secret
+        try:
+            # Optional: unauthenticated GitHub API calls are limited to 60 per hour per IP
+            path, count = collect_releases(args.repo, args.inbox_dir, args.limit, token=get_secret("GITHUB_TOKEN"))
+        except (requests.RequestException, ValueError) as e:
+            print(f"Releases not collected: {e}")
+            sys.exit(1)
+        print(f"Wrote {count} releases of {args.repo} to {path}")
 
     elif args.command == "query":
         from src.core.vectorstore import create_or_get_vectorstore

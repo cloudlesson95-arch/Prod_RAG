@@ -12,6 +12,13 @@
     {"query": "Why is the quokka called the happiest animal in the world?", "source_doc": "ingested/batch/quokkas.md"},
     {"query": "Which small marsupial poses for tourist selfies off the coast of Western Australia?", "source_doc": "ingested/batch/quokkas.md"}
   ],
+  "release_notes": [
+    {"query": "What changed in the latest Pydantic AI release?", "source_doc": "ingested/batch/pydantic-pydantic-ai-releases.md"},
+    {"query": "Which bug fixes went into the most recent Pydantic AI releases?", "source_doc": "ingested/batch/pydantic-pydantic-ai-releases.md"},
+    {"query": "What new features did Pydantic AI add in its recent releases?", "source_doc": "ingested/batch/pydantic-pydantic-ai-releases.md"},
+    {"query": "Are there compatibility notes in the latest Pydantic AI release notes?", "source_doc": "ingested/batch/pydantic-pydantic-ai-releases.md"},
+    {"query": "Which security fixes were released recently for Pydantic AI?", "source_doc": "ingested/batch/pydantic-pydantic-ai-releases.md"}
+  ],
   "off_corpus": [
     {"query": "What is the capital of Japan?"},
     {"query": "Who painted the Mona Lisa?"},
