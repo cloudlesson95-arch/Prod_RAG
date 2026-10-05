@@ -21,6 +21,10 @@ def main():
                                          help="Index every file in an inbox folder and publish one snapshot")
     batch_parser.add_argument("--dir", dest="inbox_dir", default="inbox",
                               help="Folder with .txt, .md and .pdf files (default: inbox)")
+    batch_parser.add_argument("--skip-questions", action="store_true",
+                              help="Don't have the LLM write questions (offline runs); a later batch fills them in")
+    batch_parser.add_argument("--result-file", default=None,
+                              help="Also write the result as JSON (read by the scheduled workflow)")
 
     # Release-notes collector command
     collect_parser = subparsers.add_parser("collect-releases",
@@ -93,7 +97,7 @@ def main():
         from src.storage.state_store import SnapshotConflict
         from src.storage.state_sync import StateReadOnlyError
         try:
-            result = ingest_batch(args.inbox_dir)
+            result = ingest_batch(args.inbox_dir, generate=not args.skip_questions)
         except (FileNotFoundError, StateReadOnlyError) as e:
             print(f"Batch not ingested: {e}")
             sys.exit(1)
@@ -107,6 +111,8 @@ def main():
                 print(f"  {status:<10} {name}")
         for name, reason in result.failed:
             print(f"  {'FAILED':<10} {name}: {reason}")
+        if result.questions_generated:
+            print(f"  {'questions':<10} {result.questions_generated} written for {', '.join(result.question_sources)}")
 
         if not result.published:
             print("Nothing new to index.")
@@ -115,6 +121,11 @@ def main():
         else:
             print(f"Published snapshot {result.state_version} ({len(result.changed_sources)} sources changed).\n"
                   "Running apps keep serving the previous snapshot until restarted (README: 'Add documents').")
+        if args.result_file:
+            import dataclasses
+            import json
+            with open(args.result_file, "w", encoding="utf-8") as f:
+                json.dump({**dataclasses.asdict(result), "changed_sources": sorted(result.changed_sources)}, f, indent=2)
         sys.exit(1 if result.failed else 0)
 
     elif args.command == "collect-releases":

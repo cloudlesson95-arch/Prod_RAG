@@ -1,3 +1,4 @@
+import hashlib
 from contextlib import contextmanager
 
 import pytest
@@ -29,6 +30,13 @@ def batch_env(tmp_path, monkeypatch):
     monkeypatch.setattr(batch, "read_local_version", lambda: "v2")
     monkeypatch.setattr(batch, "state_write", fake_state_write)
     monkeypatch.setattr(batch, "sync_and_retrain", fake_sync_and_retrain)
+    # Questions: no LLM, nothing missing, and generation yields nothing unless a test says otherwise
+    monkeypatch.setattr(batch, "DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setattr(batch, "sources_missing_questions", lambda: [])
+    monkeypatch.setattr(batch, "create_llm", lambda provider: "fake-llm")
+    monkeypatch.setattr(batch, "generate_questions", lambda text, llm: [])
+    monkeypatch.setattr(batch, "replace_questions",
+                        lambda source, file_hash, items: calls.append(("questions", source, file_hash, len(items))))
     return inbox, batch_dir, calls
 
 
@@ -109,3 +117,67 @@ def test_missing_inbox_fails_before_touching_state(batch_env, tmp_path):
     with pytest.raises(FileNotFoundError):
         batch.ingest_batch(str(tmp_path / "no-such-inbox"))
     assert calls == []
+
+
+def _qa(n):
+    return [{"question": f"Question {i}?", "answer": "An answer.", "context": "A chunk."} for i in range(n)]
+
+
+def test_new_files_get_questions_stored_before_the_retrain(batch_env, monkeypatch):
+    """Verify questions for new files are stored inside the write block, before the retrain, under the written file's hash."""
+    inbox, batch_dir, calls = batch_env
+    (inbox / "quokkas.txt").write_bytes(b"Quokkas live on Rottnest Island.")
+    monkeypatch.setattr(batch, "generate_questions", lambda text, llm: _qa(2))
+
+    result = batch.ingest_batch(str(inbox))
+
+    file_hash = hashlib.sha256((batch_dir / "quokkas.txt").read_bytes()).hexdigest()
+    assert calls == ["init", "enter", ("questions", "ingested/batch/quokkas.txt", file_hash, 2),
+                     ("sync", ["quokkas.txt"]), "exit"]
+    assert (result.questions_generated, result.question_sources) == (2, ["ingested/batch/quokkas.txt"])
+
+
+def test_documents_without_questions_are_filled_in_even_with_nothing_new(batch_env, monkeypatch, tmp_path):
+    """Verify an indexed document without questions (here a seed file) gets them, and that alone publishes a snapshot."""
+    inbox, batch_dir, calls = batch_env
+    batch_dir.mkdir(parents=True)
+    (batch_dir / "a.txt").write_bytes(b"same text")
+    (inbox / "a.txt").write_bytes(b"same text")
+    (tmp_path / "data" / "cat-facts.txt").write_bytes(b"A group of cats is called a clowder.")
+    monkeypatch.setattr(batch, "sources_missing_questions", lambda: ["cat-facts.txt"])
+    monkeypatch.setattr(batch, "generate_questions", lambda text, llm: _qa(1))
+
+    result = batch.ingest_batch(str(inbox))
+
+    seed_hash = hashlib.sha256(b"A group of cats is called a clowder.").hexdigest()
+    assert calls == ["init", "enter", ("questions", "cat-facts.txt", seed_hash, 1), ("sync", ["a.txt"]), "exit"]
+    assert result.unchanged == ["a.txt"] and result.published
+
+
+def test_skip_questions_makes_no_llm_calls(batch_env, monkeypatch):
+    """Verify --skip-questions ingests the files without creating an LLM or asking it anything."""
+    inbox, batch_dir, calls = batch_env
+    (inbox / "a.txt").write_bytes(b"text")
+    monkeypatch.setattr(batch, "create_llm", lambda provider: pytest.fail("LLM created"))
+    monkeypatch.setattr(batch, "generate_questions", lambda text, llm: pytest.fail("questions generated"))
+
+    result = batch.ingest_batch(str(inbox), generate=False)
+
+    assert calls == ["init", "enter", ("sync", ["a.txt"]), "exit"]
+    assert result.published and result.questions_generated == 0
+
+
+def test_no_llm_still_ingests_the_files(batch_env, monkeypatch):
+    """Verify a missing key or unreachable provider costs the questions, not the batch."""
+    inbox, batch_dir, calls = batch_env
+    (inbox / "a.txt").write_bytes(b"text")
+
+    def no_llm(provider):
+        raise RuntimeError("GROQ_API_KEY is not set")
+
+    monkeypatch.setattr(batch, "create_llm", no_llm)
+
+    result = batch.ingest_batch(str(inbox))
+
+    assert calls == ["init", "enter", ("sync", ["a.txt"]), "exit"]
+    assert result.published and result.questions_generated == 0
