@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import pytest
 
 from src.core import rag_agent
-from src.routing import classifier, clustering, corpus_probe
+from src.routing import classifier, clustering, corpus_probe, router
 
 QUESTION = "Where does the quokka live?"
 
@@ -28,7 +28,7 @@ def routing(monkeypatch):
 
     monkeypatch.setattr(rag_agent, "ROUTING_METHOD", "classical")
     monkeypatch.setattr(rag_agent, "ENABLE_SEMANTIC_CACHE", False)
-    monkeypatch.setattr(rag_agent, "CORPUS_PROBE_THRESHOLD", 0.55)
+    monkeypatch.setattr(router, "CORPUS_PROBE_THRESHOLD", 0.55)
     monkeypatch.setattr(rag_agent, "retrieve_and_answer", fake_retrieve_and_answer)
     monkeypatch.setattr(classifier, "predict_needs_retrieval_with_confidence", lambda emb: (False, 0.54))
     monkeypatch.setattr(clustering, "predict_source", lambda emb: "ingested/batch/quokka.txt")

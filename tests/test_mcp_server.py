@@ -1,4 +1,5 @@
 import pytest
+from types import SimpleNamespace
 from src.core.mcp_server import search_documents, route_query, get_corpus_stats, build_transport_security
 
 def test_search_documents():
@@ -30,3 +31,18 @@ def test_transport_security_disables_host_check_for_public_deployments():
     """Verify MCP_DNS_REBINDING_PROTECTION=false turns the Host/Origin check off."""
     settings = build_transport_security(False)
     assert settings.enable_dns_rebinding_protection is False
+
+def test_route_query_reports_the_shared_decision(monkeypatch):
+    """Verify route_query returns the shared router's decision, probe overrule included (it used to ignore the probe)."""
+    from src.core import mcp_server
+    from src.routing import router
+
+    vs = SimpleNamespace(_embedding_function=SimpleNamespace(embed_query=lambda text: [1.0, 0.0]))
+    monkeypatch.setattr(mcp_server, "get_vectorstore", lambda: vs)
+    monkeypatch.setattr(router, "decide_route",
+                        lambda emb, vectorstore: router.RouteResult(True, "ingested/batch/quokka.txt", 0.54, 0.75, "probe"))
+
+    assert route_query(query="Where does the quokka live?") == {
+        "needs_retrieval": True, "predicted_source": "ingested/batch/quokka.txt",
+        "confidence": 0.54, "probe_similarity": 0.75, "reason": "probe",
+    }

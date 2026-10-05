@@ -74,25 +74,21 @@ def search_documents(query: str, source_filter: str = "none", k: int = 4) -> Lis
 
 @mcp.tool()
 def route_query(query: str) -> Dict[str, Any]:
-    """Determine whether a query requires document retrieval and predict the target source file.
-    
+    """Decide whether a query needs document retrieval and which source file to search, the same way /query does.
+
     Args:
         query: The user query to evaluate.
     """
-    from src.routing.classifier import predict_needs_retrieval
-    from src.routing.clustering import predict_source
+    from src.routing.router import decide_route
 
     vs = get_vectorstore()
-    query_embedding = vs._embedding_function.embed_query(query)
-    
-    predicted_source = "none"
-    needs_retrieval = predict_needs_retrieval(query_embedding)
-    if needs_retrieval:
-        predicted_source = predict_source(query_embedding)
-        
+    route = decide_route(vs._embedding_function.embed_query(query), vs)
     return {
-        "needs_retrieval": needs_retrieval,
-        "predicted_source": predicted_source
+        "needs_retrieval": route.needs_retrieval,
+        "predicted_source": route.source,
+        "confidence": route.confidence,
+        "probe_similarity": route.probe_similarity,
+        "reason": route.reason,
     }
 
 @mcp.tool()
