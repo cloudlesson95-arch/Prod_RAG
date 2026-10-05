@@ -64,17 +64,29 @@ def test_limit_counts_published_releases_and_token_is_optional(github):
 
 
 def test_render_strips_generated_noise_and_nests_headings():
-    """Verify credits, PR links, the contributor list and the changelog link go, body headings nest under the release,
-    and every change line carries its release tag."""
+    """Verify credits, PR links, the contributor list, the changelog link and the generic What's Changed heading go,
+    body headings nest under the release, and every change line carries its release tag."""
     text = github_releases.render_release_notes("pydantic/pydantic-ai", RELEASES[1:])
 
     assert text == (
         "# pydantic/pydantic-ai release notes\n\nSource: https://github.com/pydantic/pydantic-ai/releases\n\n"
-        "## v2.0.0 (2026-10-02)\n\n"
-        "### What's Changed\n#### 🚀 Features\n"
-        "* [v2.0.0] Add `OpenAILiveModel` (#8390)\n* [v2.0.0] Map JSON decode errors (#8846)\n* [v2.0.0] Bump packages (#9076)\n\n"
+        "Newest first; the latest release is v2.0.0.\n\n"
+        "## v2.0.0 (2026-10-02), latest release\n\n"
+        "#### 🚀 Features in v2.0.0 (latest release)\n"
+        "* [v2.0.0] [latest release] Add `OpenAILiveModel` (#8390)\n"
+        "* [v2.0.0] [latest release] Map JSON decode errors (#8846)\n"
+        "* [v2.0.0] [latest release] Bump packages (#9076)\n\n"
         "## v1.9.1\n"
     )
+
+
+def test_only_the_newest_release_is_labelled_latest():
+    """Verify older releases carry only their own marker and heading suffix, never the latest label."""
+    older = {**RELEASES[1], "tag_name": "v1.9.0", "name": "v1.9.0 (2026-09-01)"}
+    text = github_releases.render_release_notes("pydantic/pydantic-ai", [RELEASES[1], older])
+
+    assert text.count("[latest release]") == 3
+    assert "## v1.9.0 (2026-09-01)\n\n#### 🚀 Features in v1.9.0\n* [v1.9.0] Add `OpenAILiveModel` (#8390)\n" in text
 
 
 def test_collect_writes_one_safe_file_with_stable_bytes(github, tmp_path):

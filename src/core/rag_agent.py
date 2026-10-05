@@ -10,6 +10,7 @@ from src.retrieval.semantic_cache import check_cache, add_to_cache
 from src.retrieval.hybrid_search import hybrid_retrieve
 from src.retrieval.reranker import rerank_documents
 from src.retrieval.multi_hop import execute_multi_hop_pipeline
+from src.retrieval import versions
 
 from src.logging_config import setup_logging
 logger = setup_logging(__name__)
@@ -41,7 +42,17 @@ def setup_router():
     return router_llm
 
 def retrieve_chunks(query: str, source_filter: str, vectorstore):
-    """Retrieve top-k chunks using Hybrid Search and/or Re-Ranking."""
+    """Retrieve top-k chunks using Hybrid Search and/or Re-Ranking.
+
+    A question that names a release ("v2.51.0") gets that release's own chunks first: neither the
+    embeddings nor the reranker tell version numbers apart, so those chunks would otherwise lose to
+    similar chunks from other releases.
+    """
+    named = versions.chunks_of_named_release(vectorstore, query, source_filter)
+    if len(named) >= K_RETRIEVAL:
+        logger.info(f"[Retrieval]: Question names a release; choosing among its {len(named)} chunks")
+        return rerank_documents(query, named, top_k=K_RETRIEVAL) if ENABLE_RERANKER else named[:K_RETRIEVAL]
+
     fetch_k = K_CANDIDATES if ENABLE_RERANKER else K_RETRIEVAL
 
     if ENABLE_HYBRID_SEARCH:
@@ -63,6 +74,9 @@ def retrieve_chunks(query: str, source_filter: str, vectorstore):
     else:
         results = results[:K_RETRIEVAL]
 
+    if named:  # a release with only a few chunks: all of them first, then the best of the rest
+        kept = {doc.page_content for doc in named}
+        results = (named + [doc for doc in results if doc.page_content not in kept])[:K_RETRIEVAL]
     return results
 
 def retrieve_and_answer(query: str, source_filter: str, vectorstore, answer_llm) -> tuple[str, str]:
@@ -125,7 +139,7 @@ def answer_question(question: str, router, vectorstore, answer_llm, max_retries:
         from src.routing.router import decide_route
 
         query_embedding = vectorstore._embedding_function.embed_query(question)
-        route = decide_route(query_embedding, vectorstore)
+        route = decide_route(query_embedding, vectorstore, query=question)
 
         if not route.needs_retrieval:
             answer = answer_llm.invoke(question).content

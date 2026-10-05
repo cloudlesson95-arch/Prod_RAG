@@ -40,7 +40,7 @@ def load_probe_questions(questions_path: str = EVAL_QUESTIONS_PATH,
 def run_routing_report(vectorstore, items) -> list[ReportRow]:
     """Route every question with the same decide_route() that /query uses. Makes no LLM calls."""
     embed = vectorstore._embedding_function.embed_query
-    return [ReportRow(group, query, expected, decide_route(embed(query), vectorstore))
+    return [ReportRow(group, query, expected, decide_route(embed(query), vectorstore, query))
             for group, query, expected in items]
 
 

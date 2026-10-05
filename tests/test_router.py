@@ -1,5 +1,6 @@
 import pytest
 
+from src.retrieval import versions
 from src.routing import classifier, corpus_probe, router
 
 
@@ -39,3 +40,11 @@ def test_empty_index_searches_every_source(votes):
     votes["classifier"], votes["probe"] = (True, 0.61), (None, 0.0)
     route = router.decide_route([1.0, 0.0], vectorstore=None)
     assert route == router.RouteResult(True, "none", 0.61, 0.0, "classifier")
+
+
+def test_a_named_release_routes_to_its_source(votes, monkeypatch):
+    """Verify a question naming an indexed release goes to that release's source, even against both votes."""
+    votes["probe"] = ("pydantic.llms-full.txt", 0.80)
+    monkeypatch.setattr(versions, "release_source", lambda vs, query: "ingested/batch/releases.md")
+    route = router.decide_route([1.0, 0.0], vectorstore=None, query="What changed in v2.51.0?")
+    assert route == router.RouteResult(True, "ingested/batch/releases.md", 0.54, 0.80, "version")

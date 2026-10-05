@@ -82,7 +82,7 @@ def route_query(query: str) -> Dict[str, Any]:
     from src.routing.router import decide_route
 
     vs = get_vectorstore()
-    route = decide_route(vs._embedding_function.embed_query(query), vs)
+    route = decide_route(vs._embedding_function.embed_query(query), vs, query=query)
     return {
         "needs_retrieval": route.needs_retrieval,
         "predicted_source": route.source,

@@ -12,8 +12,15 @@ GITHUB_API = "https://api.github.com"
 _AUTHOR_SUFFIX = re.compile(
     r" by (?:\[@[\w-]+\]\([^)\s]*\)|@[\w-]+(?:\[bot\])?) in https://github\.com/[\w.-]+/[\w.-]+/pull/(\d+)"
 )
-_DROPPED_LINE_PREFIXES = ("<!--", "**Full Changelog**", "## New Contributors")
+# "## What's Changed" heads every release and matches every "what changed?" question, whatever the version
+_DROPPED_LINE_PREFIXES = ("<!--", "**Full Changelog**", "## New Contributors", "## What's Changed")
 _LIST_ITEM = re.compile(r"^(\s*[*-] )")
+LATEST_LABEL = "latest release"
+
+
+def release_marker(tag: str) -> str:
+    """The marker that starts every change line of a release, e.g. '[v2.53.0]'. Retrieval matches it exactly."""
+    return f"[{tag}]"
 
 
 def fetch_releases(repo: str, limit: int = 10, token: str | None = None) -> list[dict]:
@@ -34,21 +41,28 @@ def fetch_releases(repo: str, limit: int = 10, token: str | None = None) -> list
     return releases[:limit]
 
 
-def clean_release_body(body: str, tag: str = "") -> str:
-    """Strip generated-notes noise (author and PR links, contributor list, changelog link) and keep the change lines.
+def clean_release_body(body: str, tag: str = "", latest: bool = False) -> str:
+    """Strip generated-notes noise (author and PR links, contributor list, changelog link, the generic
+    "What's Changed" heading) and keep the change lines.
 
-    Body headings move down one level so they nest under each release's '##' heading. With a tag, every list
-    item starts with it ("* [v2.53.0] ..."): a chunk from the middle of a release has no heading, so without
-    the tag an answer can't tell which release a change belongs to.
+    With a tag, the release is named on every line: a chunk from the middle of a release has no heading,
+    and neither embeddings nor the reranker connect it to one otherwise. List items start with its marker
+    ("* [v2.53.0] ..."), and body headings end with it ("#### 🐛 Bug Fixes in v2.53.0"), one level below the
+    release's '##' heading. The newest release is labelled as the latest, since similarity alone can't
+    answer "latest" questions.
     """
+    marker = f"{release_marker(tag)} [{LATEST_LABEL}] " if latest else f"{release_marker(tag)} "
+    heading_suffix = f" in {tag} ({LATEST_LABEL})" if latest else f" in {tag}"
     lines = []
     for line in (body or "").replace("\r\n", "\n").split("\n"):
         if line.startswith(_DROPPED_LINE_PREFIXES) or "made their first contribution" in line:
             continue
         line = _AUTHOR_SUFFIX.sub(r" (#\1)", line)
         if tag:
-            line = _LIST_ITEM.sub(lambda m: f"{m.group(1)}[{tag}] ", line, count=1)
-        lines.append("#" + line if line.startswith("#") else line)
+            line = _LIST_ITEM.sub(lambda m: m.group(1) + marker, line, count=1)
+        if line.startswith("#"):
+            line = "#" + line.rstrip() + (heading_suffix if tag else "")
+        lines.append(line)
     return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
 
 
@@ -56,12 +70,17 @@ def render_release_notes(repo: str, releases: list[dict]) -> str:
     """Render releases as one Markdown document, newest first.
 
     Nothing run-dependent (such as a fetch time) goes in, so unchanged releases render byte-identically
-    and ingest-batch reports the file as unchanged, which publishes nothing.
+    and ingest-batch reports the file as unchanged, which publishes nothing. A new release moves the
+    "latest release" label, which changes the file anyway.
     """
-    parts = [f"# {repo} release notes\n\nSource: https://github.com/{repo}/releases"]
-    for release in releases:
-        title = release.get("name") or release["tag_name"]
-        body = clean_release_body(release.get("body") or "", release["tag_name"])
+    header = f"# {repo} release notes\n\nSource: https://github.com/{repo}/releases"
+    if releases:
+        header += f"\n\nNewest first; the {LATEST_LABEL} is {releases[0]['tag_name']}."
+    parts = [header]
+    for i, release in enumerate(releases):
+        tag, latest = release["tag_name"], i == 0
+        title = (release.get("name") or tag) + (f", {LATEST_LABEL}" if latest else "")
+        body = clean_release_body(release.get("body") or "", tag, latest)
         parts.append(f"## {title}\n\n{body}" if body else f"## {title}")
     return "\n\n".join(parts) + "\n"
 

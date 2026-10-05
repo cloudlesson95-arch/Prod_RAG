@@ -40,7 +40,7 @@ def test_route_query_reports_the_shared_decision(monkeypatch):
     vs = SimpleNamespace(_embedding_function=SimpleNamespace(embed_query=lambda text: [1.0, 0.0]))
     monkeypatch.setattr(mcp_server, "get_vectorstore", lambda: vs)
     monkeypatch.setattr(router, "decide_route",
-                        lambda emb, vectorstore: router.RouteResult(True, "ingested/batch/quokka.txt", 0.54, 0.75, "probe"))
+                        lambda emb, vectorstore, query="": router.RouteResult(True, "ingested/batch/quokka.txt", 0.54, 0.75, "probe"))
 
     assert route_query(query="Where does the quokka live?") == {
         "needs_retrieval": True, "predicted_source": "ingested/batch/quokka.txt",

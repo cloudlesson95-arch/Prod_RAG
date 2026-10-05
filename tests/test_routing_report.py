@@ -49,7 +49,7 @@ def test_rows_are_scored_against_their_expectation(monkeypatch):
         "Capital of Peru?": RouteResult(True, "fictional_text.txt", 0.40, 0.60, "probe"),
         "Hello!": RouteResult(False, "none", 0.80, 0.20, "no_retrieval"),
     }
-    monkeypatch.setattr(routing_report, "decide_route", lambda emb, vs: routes[emb])
+    monkeypatch.setattr(routing_report, "decide_route", lambda emb, vs, query: routes[emb])
     vectorstore = SimpleNamespace(_embedding_function=SimpleNamespace(embed_query=lambda text: text))
     items = [("benchmark", "Cats?", "cat-facts.txt"), ("new_docs", "Quokkas?", "ingested/batch/quokkas.md"),
              ("off_corpus", "Capital of Peru?", None), ("off_corpus", "Hello!", None)]
