@@ -5,7 +5,8 @@ from dataclasses import dataclass, field
 from src.config import DATA_DIR, EVAL_LLM_MODEL, INGESTED_DATA_DIR
 from src.core.indexing import sync_and_retrain
 from src.core.utils import create_llm
-from src.core.vectorstore import compute_file_hash
+from src.core.vectorstore import compute_file_hash, create_or_get_vectorstore
+from src.evaluation.routing_report import benchmark_routing_failures
 from src.ingestion.errors import IngestError
 from src.ingestion.extract import extract_upload_text, safe_upload_name
 from src.ingestion.questions import generate_questions
@@ -34,6 +35,14 @@ class BatchResult:
     question_sources: list[str] = field(default_factory=list)  # documents that got new questions in this batch
 
 
+class RoutingRegression(Exception):
+    """After the retrain, benchmark questions would no longer route as expected, so the batch isn't published."""
+
+    def __init__(self, failures: list[str]):
+        super().__init__(f"{len(failures)} benchmark question(s) would be misrouted")
+        self.failures = failures
+
+
 def ingest_batch(inbox_dir: str, generate: bool = True, llm=None) -> BatchResult:
     """Index every .txt, .md and .pdf file in inbox_dir into the shared corpus and publish one snapshot.
 
@@ -50,6 +59,7 @@ def ingest_batch(inbox_dir: str, generate: bool = True, llm=None) -> BatchResult
         FileNotFoundError: inbox_dir doesn't exist.
         StateReadOnlyError: The latest snapshot couldn't be restored, so nothing may be published.
         SnapshotConflict: Another writer published while this batch ran.
+        RoutingRegression: After the retrain, benchmark questions would be misrouted; nothing was published.
     """
     if not os.path.isdir(inbox_dir):
         raise FileNotFoundError(f"Inbox folder '{inbox_dir}' does not exist")
@@ -98,6 +108,10 @@ def ingest_batch(inbox_dir: str, generate: bool = True, llm=None) -> BatchResult
         for source, (file_hash, items) in planned.items():
             replace_questions(source, file_hash, items)
         result.changed_sources = sync_and_retrain()  # retrains the classifier on the questions stored above
+        # Guard before the upload: raising here leaves the published snapshot untouched
+        failures = benchmark_routing_failures(create_or_get_vectorstore())
+        if failures:
+            raise RoutingRegression(failures)
 
     result.question_sources = sorted(planned)
     result.questions_generated = sum(len(items) for _, items in planned.values())

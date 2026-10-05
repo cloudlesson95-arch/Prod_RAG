@@ -24,13 +24,19 @@ class ReportRow:
         return self.route.needs_retrieval and self.route.source == self.expected_source
 
 
-def load_probe_questions(questions_path: str = EVAL_QUESTIONS_PATH,
-                         probe_path: str = ROUTING_PROBE_PATH) -> list[tuple[str, str, str | None]]:
-    """Return (group, query, expected source or None) for the benchmark and every group of the probe fixture."""
+def load_benchmark_items(questions_path: str = EVAL_QUESTIONS_PATH) -> list[tuple[str, str, str | None]]:
+    """Return (group, query, expected source or None) for every benchmark question."""
     items = []
     for q in load_questions(questions_path):
         source = q.get("source_doc")
         items.append(("benchmark", q["query"], None if source in (None, GENERAL_SOURCE) else source))
+    return items
+
+
+def load_probe_questions(questions_path: str = EVAL_QUESTIONS_PATH,
+                         probe_path: str = ROUTING_PROBE_PATH) -> list[tuple[str, str, str | None]]:
+    """Return (group, query, expected source or None) for the benchmark and every group of the probe fixture."""
+    items = load_benchmark_items(questions_path)
     with open(probe_path, "r", encoding="utf-8") as f:
         for group, questions in json.load(f).items():
             items.extend((group, q["query"], q.get("source_doc")) for q in questions)
@@ -42,6 +48,17 @@ def run_routing_report(vectorstore, items) -> list[ReportRow]:
     embed = vectorstore._embedding_function.embed_query
     return [ReportRow(group, query, expected, decide_route(embed(query), vectorstore, query))
             for group, query, expected in items]
+
+
+def benchmark_routing_failures(vectorstore, questions_path: str = EVAL_QUESTIONS_PATH) -> list[str]:
+    """Benchmark questions the router no longer handles as expected, one readable line each.
+
+    The publish guard of ingest-batch: a question with a source must still be retrieved from that source,
+    and the general one must still be answered without retrieval. These are the questions the live-eval gate asks.
+    """
+    rows = run_routing_report(vectorstore, load_benchmark_items(questions_path))
+    return [f"'{row.query}': expected {row.expected_source or 'no retrieval'}, "
+            f"routed to {row.route.source} ({row.route.reason})" for row in rows if not row.ok]
 
 
 def summarize(rows: list[ReportRow]) -> dict[str, dict[str, int]]:

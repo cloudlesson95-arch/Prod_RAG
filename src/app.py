@@ -93,7 +93,7 @@ def main():
     elif args.command == "ingest-batch":
         import sys
         from src.config import STATE_BACKEND
-        from src.ingestion.batch import ingest_batch
+        from src.ingestion.batch import RoutingRegression, ingest_batch
         from src.storage.state_store import SnapshotConflict
         from src.storage.state_sync import StateReadOnlyError
         try:
@@ -104,6 +104,11 @@ def main():
         except SnapshotConflict as e:
             print(f"Batch not published: {e}.\n"
                   "Another writer published while this batch ran. Run ingest-batch again; it starts from the latest snapshot.")
+            sys.exit(1)
+        except RoutingRegression as e:
+            print(f"Batch not published: {e}. After the retrain, the router would send them elsewhere:")
+            for line in e.failures:
+                print(f"  {line}")
             sys.exit(1)
 
         for status, names in (("added", result.added), ("modified", result.modified), ("unchanged", result.unchanged)):

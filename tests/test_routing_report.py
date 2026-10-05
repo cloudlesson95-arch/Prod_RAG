@@ -62,3 +62,23 @@ def test_rows_are_scored_against_their_expectation(monkeypatch):
                                    "reached": 1, "right_source": 0, "expect_none": 0, "wrongly_retrieved": 0}
     assert (summary["off_corpus"]["expect_none"], summary["off_corpus"]["wrongly_retrieved"]) == (2, 1)
     assert "[expected ingested/batch/quokkas.md]" in routing_report.format_report(rows)
+
+
+def test_benchmark_routing_failures_lists_only_the_misrouted_questions(tmp_path, monkeypatch):
+    """Verify the publish guard reports a question routed to the wrong source and a general question that retrieves."""
+    questions = tmp_path / "questions.json"
+    questions.write_text(json.dumps([{"query": "Cats?", "source_doc": "cat-facts.txt"},
+                                     {"query": "Oakhaven?", "source_doc": "fictional_text.txt"},
+                                     {"query": "2 + 2?", "source_doc": "general"}]), encoding="utf-8")
+    routes = {
+        "Cats?": RouteResult(True, "cat-facts.txt", 0.61, 0.70, "classifier"),
+        "Oakhaven?": RouteResult(True, "ingested/batch/clowder.md", 0.58, 0.66, "classifier"),
+        "2 + 2?": RouteResult(True, "pydantic.llms-full.txt", 0.40, 0.58, "probe"),
+    }
+    monkeypatch.setattr(routing_report, "decide_route", lambda emb, vs, query: routes[emb])
+    vectorstore = SimpleNamespace(_embedding_function=SimpleNamespace(embed_query=lambda text: text))
+
+    assert routing_report.benchmark_routing_failures(vectorstore, str(questions)) == [
+        "'Oakhaven?': expected fictional_text.txt, routed to ingested/batch/clowder.md (classifier)",
+        "'2 + 2?': expected no retrieval, routed to pydantic.llms-full.txt (probe)",
+    ]

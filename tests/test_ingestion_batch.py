@@ -37,6 +37,8 @@ def batch_env(tmp_path, monkeypatch):
     monkeypatch.setattr(batch, "generate_questions", lambda text, llm: [])
     monkeypatch.setattr(batch, "replace_questions",
                         lambda source, file_hash, items: calls.append(("questions", source, file_hash, len(items))))
+    monkeypatch.setattr(batch, "create_or_get_vectorstore", lambda: "fake-vectorstore")
+    monkeypatch.setattr(batch, "benchmark_routing_failures", lambda vectorstore: [])
     return inbox, batch_dir, calls
 
 
@@ -181,3 +183,17 @@ def test_no_llm_still_ingests_the_files(batch_env, monkeypatch):
 
     assert calls == ["init", "enter", ("sync", ["a.txt"]), "exit"]
     assert result.published and result.questions_generated == 0
+
+
+def test_misrouted_benchmark_stops_the_publish(batch_env, monkeypatch):
+    """Verify a retrain that misroutes a benchmark question raises inside the write block, so nothing is uploaded."""
+    inbox, batch_dir, calls = batch_env
+    (inbox / "clowder.md").write_bytes(b"A group of cats is called a clowder.")
+    failure = "'What is a group of cats called?': expected cat-facts.txt, routed to ingested/batch/clowder.md (classifier)"
+    monkeypatch.setattr(batch, "benchmark_routing_failures", lambda vectorstore: [failure])
+
+    with pytest.raises(batch.RoutingRegression) as raised:
+        batch.ingest_batch(str(inbox))
+
+    assert raised.value.failures == [failure]
+    assert calls == ["init", "enter", ("sync", ["clowder.md"])]  # no "exit": the block never finished, so no upload
