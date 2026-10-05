@@ -19,6 +19,18 @@
     {"query": "Are there compatibility notes in the latest Pydantic AI release notes?", "source_doc": "ingested/batch/pydantic-pydantic-ai-releases.md"},
     {"query": "Which security fixes were released recently for Pydantic AI?", "source_doc": "ingested/batch/pydantic-pydantic-ai-releases.md"}
   ],
+  "held_out": [
+    {"query": "How long is the Trans-Siberian Railway?", "source_doc": "ingested/batch/trans-siberian.md"},
+    {"query": "Which two cities does the Trans-Siberian Railway connect?", "source_doc": "ingested/batch/trans-siberian.md"},
+    {"query": "When was the Trans-Siberian Railway built?", "source_doc": "ingested/batch/trans-siberian.md"},
+    {"query": "How many days does the train from Moscow to Vladivostok take?", "source_doc": "ingested/batch/trans-siberian.md"},
+    {"query": "How many time zones does the Trans-Siberian route cross?", "source_doc": "ingested/batch/trans-siberian.md"},
+    {"query": "Which lake does the Trans-Siberian Railway run along?", "source_doc": "ingested/batch/trans-siberian.md"},
+    {"query": "What is the Trans-Mongolian route?", "source_doc": "ingested/batch/trans-siberian.md"},
+    {"query": "When was the Trans-Siberian line fully electrified?", "source_doc": "ingested/batch/trans-siberian.md"},
+    {"query": "What track gauge do Russian railways use?", "source_doc": "ingested/batch/trans-siberian.md"},
+    {"query": "Where does the train cross from Europe into Asia?", "source_doc": "ingested/batch/trans-siberian.md"}
+  ],
   "off_corpus": [
     {"query": "What is the capital of Japan?"},
     {"query": "Who painted the Mona Lisa?"},
