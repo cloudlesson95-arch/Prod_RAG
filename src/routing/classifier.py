@@ -1,4 +1,5 @@
 import os
+from collections import Counter
 import joblib
 import numpy as np
 
@@ -7,6 +8,7 @@ from src.config import CLASSIFIER_MODEL_PATH, CLUSTERS_DIR, EMBEDDING_LOCAL_MODE
 from src.logging_config import setup_logging
 from src.evaluation.evaluator import load_questions
 from src.core.vectorstore import create_or_get_vectorstore
+from src.storage.question_store import get_current_questions
 
 logger = setup_logging(__name__)
 
@@ -26,21 +28,54 @@ NON_RETRIEVAL_DATA = [
     ("How is the weather today?", 0),
 ]
 
-def load_training_data():
-    """Load evaluation questions and combine with generic non-retrieval examples."""
-    eval_questions = load_questions(EVAL_QUESTIONS_PATH)
-    
-    domain_queries = []
-    for q in eval_questions:
-        query_text = q["query"]
-        # Skip 1 general question
-        if "What is 2345 * 849?" in query_text:
-            continue
-        domain_queries.append((query_text, 1))
+# Questions the corpus doesn't cover, so the classifier learns "general knowledge" as well as chit-chat.
+# Keep them unlike the off_corpus group in baseline/routing_probe.json (other facts and other phrasings),
+# or that measurement would test the training data.
+GENERAL_KNOWLEDGE_DATA = [
+    ("Who discovered penicillin?", 0),
+    ("When did World War II end?", 0),
+    ("Who built the pyramids of Giza?", 0),
+    ("Why is the sky blue?", 0),
+    ("What is photosynthesis?", 0),
+    ("How do vaccines work?", 0),
+    ("What causes the seasons on Earth?", 0),
+    ("Which countries border Switzerland?", 0),
+    ("Who composed The Four Seasons?", 0),
+    ("What is the plot of Hamlet?", 0),
+    ("How does scoring work in tennis?", 0),
+    ("How long should I boil pasta?", 0),
+    ("Is 97 a prime number?", 0),
+    ("Convert 100 kilometers to miles.", 0),
+    ("Tell me a fun fact about the Roman Empire.", 0),
+    ("Good afternoon!", 0),
+    ("I'm bored, entertain me.", 0),
+    ("Can you help me plan my weekend?", 0),
+    ("What is the opposite of generous?", 0),
+    ("How do interest rates affect mortgages?", 0),
+    ("How much water should I drink per day?", 0),
+    ("What is the difference between weather and climate?", 0),
+    ("Translate good night into Spanish.", 0),
+    ("Recommend a good science fiction novel.", 0),
+    ("What does DNA stand for?", 0),
+]
 
-    logger.info(f"Loaded {len(domain_queries)} domain queries from question.txt (label=1)")
-    logger.info(f"Loaded {len(NON_RETRIEVAL_DATA)} generic queries (label=0)")
-    return domain_queries + NON_RETRIEVAL_DATA
+def load_training_data():
+    """Combine retrieval examples (label 1) with non-retrieval examples (label 0).
+
+    Label 1: the benchmark questions (without the general one) and the generated questions of every document
+    still indexed in the version they were written for, so retraining after an ingest learns the new documents.
+    Label 0: chit-chat and general-knowledge questions.
+    """
+    benchmark = [(q["query"], 1) for q in load_questions(EVAL_QUESTIONS_PATH) if q.get("source_doc") != "general"]
+    stored = get_current_questions()
+    generated = [(q["question"], 1) for q in stored]
+    negatives = NON_RETRIEVAL_DATA + GENERAL_KNOWLEDGE_DATA
+
+    per_source = dict(Counter(q["source"] for q in stored))
+    logger.info(f"Loaded {len(benchmark)} benchmark and {len(generated)} generated questions (label=1); "
+                f"generated per source: {per_source or 'none'}")
+    logger.info(f"Loaded {len(negatives)} chit-chat and general-knowledge questions (label=0)")
+    return benchmark + generated + negatives
 
 def train_classifier():
     """Train a Logistic Regression classifier on query embeddings to predict retrieval necessity."""
@@ -57,7 +92,9 @@ def train_classifier():
     y = np.array(labels)
 
     logger.info("Training Logistic Regression classifier...")
-    classifier = LogisticRegression(random_state=42)
+    # Balanced: generated questions soon outnumber the fixed negatives (and before any exist, the negatives
+    # outnumber the benchmark), so without weights the decision would drift with the counts alone.
+    classifier = LogisticRegression(class_weight="balanced", random_state=42)
     classifier.fit(X, y)
     
     accuracy = classifier.score(X, y) * 100

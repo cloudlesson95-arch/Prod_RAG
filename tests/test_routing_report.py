@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from src.config import EVAL_QUESTIONS_PATH, ROUTING_PROBE_PATH, SEED_DATA_DIR
 from src.evaluation import routing_report
 from src.evaluation.evaluator import load_questions
-from src.routing.classifier import NON_RETRIEVAL_DATA
+from src.routing.classifier import GENERAL_KNOWLEDGE_DATA, NON_RETRIEVAL_DATA
 from src.routing.router import RouteResult
 
 
@@ -25,7 +25,7 @@ def test_probe_fixture_expectations_and_no_overlap_with_training():
             assert all("source_doc" not in q for q in questions)
         else:
             assert all(q["source_doc"].startswith("ingested/batch/") for q in questions), group
-    negatives = {text.lower() for text, _ in NON_RETRIEVAL_DATA}
+    negatives = {text.lower() for text, _ in NON_RETRIEVAL_DATA + GENERAL_KNOWLEDGE_DATA}
     assert not negatives & {q["query"].lower() for q in probe["off_corpus"]}
 
 
