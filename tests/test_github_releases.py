@@ -64,14 +64,15 @@ def test_limit_counts_published_releases_and_token_is_optional(github):
 
 
 def test_render_strips_generated_noise_and_nests_headings():
-    """Verify credits, PR links, the contributor list and the changelog link go, and body headings nest under the release."""
+    """Verify credits, PR links, the contributor list and the changelog link go, body headings nest under the release,
+    and every change line carries its release tag."""
     text = github_releases.render_release_notes("pydantic/pydantic-ai", RELEASES[1:])
 
     assert text == (
         "# pydantic/pydantic-ai release notes\n\nSource: https://github.com/pydantic/pydantic-ai/releases\n\n"
         "## v2.0.0 (2026-10-02)\n\n"
         "### What's Changed\n#### 🚀 Features\n"
-        "* Add `OpenAILiveModel` (#8390)\n* Map JSON decode errors (#8846)\n* Bump packages (#9076)\n\n"
+        "* [v2.0.0] Add `OpenAILiveModel` (#8390)\n* [v2.0.0] Map JSON decode errors (#8846)\n* [v2.0.0] Bump packages (#9076)\n\n"
         "## v1.9.1\n"
     )
 

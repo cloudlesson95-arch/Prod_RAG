@@ -13,6 +13,7 @@ _AUTHOR_SUFFIX = re.compile(
     r" by (?:\[@[\w-]+\]\([^)\s]*\)|@[\w-]+(?:\[bot\])?) in https://github\.com/[\w.-]+/[\w.-]+/pull/(\d+)"
 )
 _DROPPED_LINE_PREFIXES = ("<!--", "**Full Changelog**", "## New Contributors")
+_LIST_ITEM = re.compile(r"^(\s*[*-] )")
 
 
 def fetch_releases(repo: str, limit: int = 10, token: str | None = None) -> list[dict]:
@@ -33,16 +34,20 @@ def fetch_releases(repo: str, limit: int = 10, token: str | None = None) -> list
     return releases[:limit]
 
 
-def clean_release_body(body: str) -> str:
+def clean_release_body(body: str, tag: str = "") -> str:
     """Strip generated-notes noise (author and PR links, contributor list, changelog link) and keep the change lines.
 
-    Body headings move down one level so they nest under each release's '##' heading.
+    Body headings move down one level so they nest under each release's '##' heading. With a tag, every list
+    item starts with it ("* [v2.53.0] ..."): a chunk from the middle of a release has no heading, so without
+    the tag an answer can't tell which release a change belongs to.
     """
     lines = []
     for line in (body or "").replace("\r\n", "\n").split("\n"):
         if line.startswith(_DROPPED_LINE_PREFIXES) or "made their first contribution" in line:
             continue
         line = _AUTHOR_SUFFIX.sub(r" (#\1)", line)
+        if tag:
+            line = _LIST_ITEM.sub(lambda m: f"{m.group(1)}[{tag}] ", line, count=1)
         lines.append("#" + line if line.startswith("#") else line)
     return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
 
@@ -56,7 +61,7 @@ def render_release_notes(repo: str, releases: list[dict]) -> str:
     parts = [f"# {repo} release notes\n\nSource: https://github.com/{repo}/releases"]
     for release in releases:
         title = release.get("name") or release["tag_name"]
-        body = clean_release_body(release.get("body") or "")
+        body = clean_release_body(release.get("body") or "", release["tag_name"])
         parts.append(f"## {title}\n\n{body}" if body else f"## {title}")
     return "\n\n".join(parts) + "\n"
 
