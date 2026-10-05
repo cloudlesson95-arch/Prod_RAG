@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import pytest
 
 from src.core import rag_agent
-from src.routing import classifier, clustering, corpus_probe, router
+from src.routing import classifier, corpus_probe, router
 
 QUESTION = "Where does the quokka live?"
 
@@ -31,15 +31,14 @@ def routing(monkeypatch):
     monkeypatch.setattr(router, "CORPUS_PROBE_THRESHOLD", 0.55)
     monkeypatch.setattr(rag_agent, "retrieve_and_answer", fake_retrieve_and_answer)
     monkeypatch.setattr(classifier, "predict_needs_retrieval_with_confidence", lambda emb: (False, 0.54))
-    monkeypatch.setattr(clustering, "predict_source", lambda emb: "ingested/batch/quokka.txt")
-    vectorstore = SimpleNamespace(_embedding_function=SimpleNamespace(embed_query=lambda text: [1.0, 0.0]))
+    vectorstore =SimpleNamespace(_embedding_function=SimpleNamespace(embed_query=lambda text: [1.0, 0.0]))
     return vectorstore, retrieved_from
 
 
-def test_close_chunk_overrules_no_retrieval_and_centroid_picks_source(routing, monkeypatch):
-    """Verify a probe hit forces retrieval from the centroid's source, not the probe chunk's source."""
+def test_close_chunk_overrules_no_retrieval_and_picks_its_source(routing, monkeypatch):
+    """Verify a probe hit forces retrieval from the closest chunk's source."""
     vectorstore, retrieved_from = routing
-    monkeypatch.setattr(corpus_probe, "probe_corpus", lambda emb, vs: ("pydantic.llms-full.txt", 0.75))
+    monkeypatch.setattr(corpus_probe, "probe_corpus", lambda emb, vs: ("ingested/batch/quokka.txt", 0.75))
     llm = FakeLLM()
 
     answer = rag_agent.answer_question(QUESTION, None, vectorstore, llm)
@@ -62,15 +61,11 @@ def test_distant_chunk_keeps_no_retrieval(routing, monkeypatch):
     assert llm.prompts == [QUESTION]
 
 
-def test_probe_is_skipped_when_classifier_already_retrieves(routing, monkeypatch):
-    """Verify the probe costs nothing on questions the classifier already routes to retrieval."""
+def test_classifier_yes_retrieves_from_the_closest_chunks_source(routing, monkeypatch):
+    """Verify a 'retrieve' vote searches the closest chunk's source even when that chunk is below the threshold."""
     vectorstore, retrieved_from = routing
     monkeypatch.setattr(classifier, "predict_needs_retrieval_with_confidence", lambda emb: (True, 0.60))
-
-    def probe_must_not_run(emb, vs):
-        raise AssertionError("probe ran although the classifier said retrieve")
-
-    monkeypatch.setattr(corpus_probe, "probe_corpus", probe_must_not_run)
+    monkeypatch.setattr(corpus_probe, "probe_corpus", lambda emb, vs: ("ingested/batch/quokka.txt", 0.40))
 
     rag_agent.answer_question(QUESTION, None, vectorstore, FakeLLM())
     assert retrieved_from == ["ingested/batch/quokka.txt"]

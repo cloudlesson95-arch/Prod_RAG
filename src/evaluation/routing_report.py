@@ -65,12 +65,12 @@ def summarize(rows: list[ReportRow]) -> dict[str, dict[str, int]]:
 
 def format_report(rows: list[ReportRow]) -> str:
     """One line per question (misses name what was expected), then one summary line per group."""
-    lines = [f"{'group':<11} {'':<4} {'reason':<12} {'conf':>5} {'probe':>5}  {'routed to':<30} question"]
+    lines = [f"{'group':<13} {'':<4} {'reason':<12} {'conf':>5} {'probe':>5}  {'routed to':<30} question"]
     for row in rows:
         r = row.route
         probe = "-" if r.probe_similarity is None else f"{r.probe_similarity:.2f}"
         miss = "" if row.ok else f"  [expected {row.expected_source or 'no retrieval'}]"
-        lines.append(f"{row.group:<11} {'OK' if row.ok else 'MISS':<4} {r.reason:<12} {r.confidence:>5.2f} "
+        lines.append(f"{row.group:<13} {'OK' if row.ok else 'MISS':<4} {r.reason:<12} {r.confidence:>5.2f} "
                      f"{probe:>5}  {r.source:<30} {row.query}{miss}")
 
     lines.append("")
@@ -82,5 +82,5 @@ def format_report(rows: list[ReportRow]) -> str:
                       f"right source {s['right_source']}/{s['expect_retrieval']}"]
         if s["expect_none"]:
             parts.append(f"wrongly retrieved {s['wrongly_retrieved']}/{s['expect_none']}")
-        lines.append(f"{group:<11} " + ", ".join(parts))
+        lines.append(f"{group:<13} " + ", ".join(parts))
     return "\n".join(lines)

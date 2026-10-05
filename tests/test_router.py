@@ -1,42 +1,41 @@
 import pytest
 
-from src.routing import classifier, clustering, corpus_probe, router
+from src.routing import classifier, corpus_probe, router
 
 
 @pytest.fixture
 def votes(monkeypatch):
-    """Fake classifier, probe and centroid router. Tests edit the dict to choose each vote."""
-    votes = {"classifier": (False, 0.54), "probe": ("pydantic.llms-full.txt", 0.75), "probe_calls": 0}
-
-    def fake_probe(emb, vs):
-        votes["probe_calls"] += 1
-        return votes["probe"]
-
+    """Fake classifier and probe. Tests edit the dict to choose each vote."""
+    votes = {"classifier": (False, 0.54), "probe": ("ingested/batch/quokka.txt", 0.75)}
     monkeypatch.setattr(router, "CORPUS_PROBE_THRESHOLD", 0.55)
     monkeypatch.setattr(classifier, "predict_needs_retrieval_with_confidence", lambda emb: votes["classifier"])
-    monkeypatch.setattr(corpus_probe, "probe_corpus", fake_probe)
-    monkeypatch.setattr(clustering, "predict_source", lambda emb: "ingested/batch/quokka.txt")
+    monkeypatch.setattr(corpus_probe, "probe_corpus", lambda emb, vs: votes["probe"])
     return votes
 
 
-def test_classifier_yes_skips_the_probe(votes):
-    """Verify a 'retrieve' vote goes straight to the centroid router without probing."""
-    votes["classifier"] = (True, 0.61)
+def test_classifier_yes_searches_the_closest_chunks_source(votes):
+    """Verify a 'retrieve' vote ignores the probe threshold, but the closest chunk still picks the source."""
+    votes["classifier"], votes["probe"] = (True, 0.61), ("cat-facts.txt", 0.40)
     route = router.decide_route([1.0, 0.0], vectorstore=None)
-    assert route == router.RouteResult(True, "ingested/batch/quokka.txt", 0.61, None, "classifier")
-    assert votes["probe_calls"] == 0
+    assert route == router.RouteResult(True, "cat-facts.txt", 0.61, 0.40, "classifier")
 
 
-def test_probe_at_threshold_overrules_and_centroid_picks_source(votes):
-    """Verify similarity == threshold counts as a hit, and the centroid (not the probe chunk) picks the source."""
-    votes["probe"] = ("pydantic.llms-full.txt", 0.55)
+def test_probe_at_threshold_overrules_no_retrieval(votes):
+    """Verify similarity == threshold counts as a hit, and the closest chunk's source is searched."""
+    votes["probe"] = ("ingested/batch/quokka.txt", 0.55)
     route = router.decide_route([1.0, 0.0], vectorstore=None)
     assert route == router.RouteResult(True, "ingested/batch/quokka.txt", 0.54, 0.55, "probe")
 
 
-def test_distant_probe_keeps_no_retrieval(votes, monkeypatch):
-    """Verify a low probe similarity answers without retrieval and never asks the centroid router."""
+def test_distant_probe_keeps_no_retrieval(votes):
+    """Verify a low probe similarity answers without retrieval."""
     votes["probe"] = ("pydantic.llms-full.txt", 0.43)
-    monkeypatch.setattr(clustering, "predict_source", lambda emb: pytest.fail("centroid router ran"))
     route = router.decide_route([1.0, 0.0], vectorstore=None)
     assert route == router.RouteResult(False, "none", 0.54, 0.43, "no_retrieval")
+
+
+def test_empty_index_searches_every_source(votes):
+    """Verify a 'retrieve' vote on an empty index falls back to 'none' (all sources) instead of failing."""
+    votes["classifier"], votes["probe"] = (True, 0.61), (None, 0.0)
+    route = router.decide_route([1.0, 0.0], vectorstore=None)
+    assert route == router.RouteResult(True, "none", 0.61, 0.0, "classifier")
