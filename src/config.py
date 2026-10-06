@@ -42,7 +42,8 @@ LOG_DATE_FORMAT = '%Y-%m-%d %H:%M:%S'
 CAPTURE_EXTERNAL_LOGS = False  # Capture logs from external libraries
 
 ROUTING_METHOD = os.getenv("ROUTING_METHOD", "classical")  # "llm", "classical"
-GENERATE_VISUALIZATION = True
+# t-SNE picture of all chunk embeddings on every retrain: minutes of CPU on a CI runner, so the workflow turns it off
+GENERATE_VISUALIZATION = os.getenv("GENERATE_VISUALIZATION", "true").lower() in ("1", "true", "yes")
 CLUSTERS_DIR = os.path.join(LOCAL_DIR, "clusters")
 CLASSIFIER_MODEL_PATH = os.path.join(CLUSTERS_DIR, "retrieval_classifier.joblib")
 # Corpus probe: a chunk at least this similar (cosine) to the query overrules the classifier's "no retrieval".

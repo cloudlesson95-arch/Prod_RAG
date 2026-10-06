@@ -1,0 +1,190 @@
+name: Collect Data
+
+on:
+  schedule:
+    - cron: "17 6 * * *"  # daily 06:17 UTC (off the hour: GitHub delays top-of-hour schedules the most)
+  workflow_dispatch:
+    inputs:
+      target_cloud:
+        description: 'Cloud(s) to update'
+        required: true
+        default: 'both'
+        type: choice
+        options:
+          - azure
+          - aws
+          - both
+      skip_questions:
+        description: 'Ingest without LLM-generated questions'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  id-token: write   # Required for Azure & AWS OIDC authentication
+  contents: read
+
+# One run at a time: two runs would race for the same snapshot, and the later publish would fail with SnapshotConflict
+concurrency:
+  group: collect-data
+  cancel-in-progress: false
+
+jobs:
+  collect-and-ingest:
+    name: Collect & Ingest (${{ matrix.cloud }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    # No `environment:` on this job: it would change the OIDC subject, and Azure's federated credential expects refs/heads/main
+    strategy:
+      fail-fast: false
+      matrix:
+        # Scheduled runs have no inputs, so they update both clouds
+        cloud: ${{ fromJSON(inputs.target_cloud == 'azure' && '["azure"]' || inputs.target_cloud == 'aws' && '["aws"]' || '["azure", "aws"]') }}
+    env:
+      SECRET_BACKEND: env
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+      GENERATE_VISUALIZATION: "false"
+      LOG_TO_FILE: "false"
+      PYTHONIOENCODING: utf-8
+      QUESTION_GEN_PAUSE_SECONDS: "2"  # stay under Groq's free-tier tokens-per-minute limit
+      REVISION: collect-${{ github.run_id }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      # Installing from the lock is what lets this runner publish: state_write() refuses environments that differ from it
+      - name: Install dependencies
+        run: pip install --extra-index-url https://download.pytorch.org/whl/cpu -r requirements.txt
+
+      - name: Cache embedding model
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-${{ runner.os }}-all-MiniLM-L6-v2
+
+      - name: Log in to Azure (OIDC)
+        if: matrix.cloud == 'azure'
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Configure AWS Credentials (OIDC)
+        if: matrix.cloud == 'aws'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Point the CLI at the state store and the app
+        run: |
+          echo "LOCAL_DIR=$RUNNER_TEMP/state/.local" >> "$GITHUB_ENV"
+          echo "DATA_DIR=$RUNNER_TEMP/state/data" >> "$GITHUB_ENV"
+          if [ "${{ matrix.cloud }}" = "azure" ]; then
+            echo "STATE_BACKEND=azure_blob" >> "$GITHUB_ENV"
+            echo "AZURE_STORAGE_ACCOUNT_URL=$(az storage account list -g ${{ vars.RESOURCE_GROUP }} --query '[0].primaryEndpoints.blob' -o tsv)" >> "$GITHUB_ENV"
+            echo "APP_URL=${{ vars.DEPLOYED_APP_URL }}" >> "$GITHUB_ENV"
+          else
+            echo "STATE_BACKEND=s3" >> "$GITHUB_ENV"
+            echo "S3_STATE_BUCKET=${{ vars.AWS_STATE_BUCKET }}" >> "$GITHUB_ENV"
+            URL=$(aws lambda get-function-url-config --function-name ragprod-api --query FunctionUrl --output text)
+            echo "APP_URL=${URL%/}" >> "$GITHUB_ENV"
+          fi
+
+      - name: Collect release notes
+        env:
+          GITHUB_TOKEN: ${{ github.token }}  # 1,000 API requests per hour instead of 60 per IP
+        run: python -m src.app collect-releases --repo "${{ vars.COLLECT_REPO || 'pydantic/pydantic-ai' }}" --dir inbox
+
+      # Never fails by itself: a batch can publish and still report unreadable files (exit 1); the last step fails the job
+      - name: Ingest batch
+        id: ingest
+        run: |
+          set +e
+          python -m src.app ingest-batch --dir inbox --result-file result.json ${{ inputs.skip_questions && '--skip-questions' || '' }}
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+          set -e
+          if [ -f result.json ]; then
+            echo "published=$(jq -r .published result.json)" >> "$GITHUB_OUTPUT"
+            { echo "### ${{ matrix.cloud }}: ingest-batch"; echo '```json'; cat result.json; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"  # it raised (refused by the routing guard, conflict, store error)
+          fi
+
+      - name: Restart the app on the new snapshot
+        if: steps.ingest.outputs.published == 'true'
+        run: |
+          if [ "${{ matrix.cloud }}" = "azure" ]; then
+            REV=$(az containerapp show -n ${{ vars.CONTAINER_APP_NAME }} -g ${{ vars.RESOURCE_GROUP }} --query properties.latestRevisionName -o tsv)
+            az containerapp revision restart -n ${{ vars.CONTAINER_APP_NAME }} -g ${{ vars.RESOURCE_GROUP }} --revision "$REV" \
+              || echo "::warning::Restart failed; a scaled-to-zero app restores the latest snapshot on its next start anyway"
+          else
+            # Any configuration change retires the warm instances, so the next requests restore the new snapshot
+            aws lambda update-function-configuration --function-name ragprod-api --description "$REVISION" > /dev/null
+            aws lambda wait function-updated --function-name ragprod-api
+          fi
+
+      - name: Wait for the new snapshot
+        if: steps.ingest.outputs.published == 'true'
+        run: |
+          EXPECTED=$(jq -r .state_version result.json)
+          for i in $(seq 1 60); do
+            CURRENT=$(curl -s --max-time 30 "$APP_URL/health" | jq -r .state_version 2>/dev/null || true)
+            if [ "$CURRENT" = "$EXPECTED" ]; then
+              echo "The app serves snapshot $CURRENT"
+              exit 0
+            fi
+            echo "Waiting: the app serves '$CURRENT', expected '$EXPECTED'"
+            sleep 10
+          done
+          echo "::error::The app never reported snapshot $EXPECTED"
+          exit 1
+
+      # /health doesn't load the router models, so only /query proves the new snapshot works
+      - name: Smoke-test /query
+        if: steps.ingest.outputs.published == 'true'
+        run: |
+          curl -sf --max-time 300 -X POST "$APP_URL/query" -H 'Content-Type: application/json' \
+            -d '{"question": "What is a group of cats called?"}' | jq -e '.answer | length > 0'
+
+      - name: Live evaluation gate
+        if: steps.ingest.outputs.published == 'true'
+        run: python -m src.app live-eval --target-url "$APP_URL" --revision "$REVISION"
+
+      - name: Synthetic evaluation (report only)
+        if: steps.ingest.outputs.published == 'true'
+        continue-on-error: true
+        run: |
+          mapfile -t SOURCES < <(jq -r '.question_sources[] | select(startswith("ingested/batch/")) | "--source=\(.)"' result.json)
+          if [ ${#SOURCES[@]} -eq 0 ]; then
+            echo "No new questions for ingested documents in this batch"
+            exit 0
+          fi
+          python -m src.app questions export --out synthetic.json "${SOURCES[@]}"
+          python -m src.app live-eval --target-url "$APP_URL" --questions synthetic.json --revision "$REVISION" --report-only
+
+      - name: Keep the batch result and inbox
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: collect-data-${{ matrix.cloud }}
+          path: |
+            result.json
+            synthetic.json
+            inbox/
+          if-no-files-found: ignore
+
+      - name: Fail if ingest-batch failed
+        if: steps.ingest.outputs.exit_code != '0'
+        run: |
+          echo "::error::ingest-batch exited with ${{ steps.ingest.outputs.exit_code }}; its step log says why (a refused batch publishes nothing)"
+          exit 1

@@ -63,7 +63,7 @@ def main():
                                   help="Question file in baseline/questions.json format, saved as a synthetic run "
                                        "(default: the benchmark, saved as live)")
     live_eval_parser.add_argument("--report-only", action="store_true",
-                                  help="Exit 0 even when the score is below the 80%% pass threshold "
+                                  help="Exit 0 even when the score is below the defined threshold "
                                        "(the score is still logged and saved)")
 
     # Generated questions command
