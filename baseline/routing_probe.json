@@ -52,5 +52,17 @@
     {"query": "What does the word serendipity mean?"},
     {"query": "How many continents are there?"},
     {"query": "What is the speed of light?"}
+  ],
+  "near_topic": [
+    {"query": "How fast can a cheetah run?"},
+    {"query": "What do giant pandas eat?"},
+    {"query": "How long do elephants live in the wild?"},
+    {"query": "How many legs does a spider have?"},
+    {"query": "What is a Django migration?"},
+    {"query": "How do I create a pivot table in pandas?"},
+    {"query": "How do I center a div with CSS?"},
+    {"query": "When is Oktoberfest held in Munich?"},
+    {"query": "How many people attended the Edinburgh Festival Fringe last year?"},
+    {"query": "What did the London city council vote on last week?"}
   ]
 }

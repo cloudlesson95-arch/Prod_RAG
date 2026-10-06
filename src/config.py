@@ -48,6 +48,10 @@ CLUSTERS_DIR = os.path.join(LOCAL_DIR, "clusters")
 CLASSIFIER_MODEL_PATH = os.path.join(CLUSTERS_DIR, "retrieval_classifier.joblib")
 # Corpus probe: a chunk at least this similar (cosine) to the query overrules the classifier's "no retrieval".
 CORPUS_PROBE_THRESHOLD = float(os.getenv("CORPUS_PROBE_THRESHOLD", "0.55"))
+# Probe floor: an unsure "retrieve" vote (confidence below the second value) only stands if some chunk is at least
+# this similar. Otherwise no document covers the question, and searching would only end in "I don't know".
+CORPUS_PROBE_FLOOR = float(os.getenv("CORPUS_PROBE_FLOOR", "0.45"))
+CORPUS_PROBE_FLOOR_MAX_CONFIDENCE = float(os.getenv("CORPUS_PROBE_FLOOR_MAX_CONFIDENCE", "0.65"))
 # Generated questions: ingest-batch has the LLM write this many Q/A pairs per new or changed document
 QUESTIONS_PER_DOC = 5
 QUESTION_GEN_PAUSE_SECONDS = float(os.getenv("QUESTION_GEN_PAUSE_SECONDS", "0"))  # raise if the LLM's rate limit bites

@@ -17,16 +17,16 @@ def test_benchmark_sources_name_real_seed_files():
 
 
 def test_probe_fixture_expectations_and_no_overlap_with_training():
-    """Verify every group but off_corpus names a batch source, and off-corpus questions expect no retrieval and are never training negatives."""
+    """Verify every group but off_corpus and near_topic names a batch source, and off-corpus questions expect no retrieval and are never training negatives."""
     with open(ROUTING_PROBE_PATH, "r", encoding="utf-8") as f:
         probe = json.load(f)
     for group, questions in probe.items():
-        if group == "off_corpus":
-            assert all("source_doc" not in q for q in questions)
+        if group in ("off_corpus", "near_topic"):
+            assert all("source_doc" not in q for q in questions), group
         else:
             assert all(q["source_doc"].startswith("ingested/batch/") for q in questions), group
     negatives = {text.lower() for text, _ in NON_RETRIEVAL_DATA + GENERAL_KNOWLEDGE_DATA}
-    assert not negatives & {q["query"].lower() for q in probe["off_corpus"]}
+    assert not negatives & {q["query"].lower() for q in probe["off_corpus"] + probe["near_topic"]}
 
 
 def test_general_benchmark_question_expects_no_retrieval(tmp_path):

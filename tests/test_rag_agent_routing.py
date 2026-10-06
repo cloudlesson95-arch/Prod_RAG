@@ -29,6 +29,8 @@ def routing(monkeypatch):
     monkeypatch.setattr(rag_agent, "ROUTING_METHOD", "classical")
     monkeypatch.setattr(rag_agent, "ENABLE_SEMANTIC_CACHE", False)
     monkeypatch.setattr(router, "CORPUS_PROBE_THRESHOLD", 0.55)
+    monkeypatch.setattr(router, "CORPUS_PROBE_FLOOR", 0.45)
+    monkeypatch.setattr(router, "CORPUS_PROBE_FLOOR_MAX_CONFIDENCE", 0.65)
     monkeypatch.setattr(rag_agent, "retrieve_and_answer", fake_retrieve_and_answer)
     monkeypatch.setattr(classifier, "predict_needs_retrieval_with_confidence", lambda emb: (False, 0.54))
     vectorstore =SimpleNamespace(_embedding_function=SimpleNamespace(embed_query=lambda text: [1.0, 0.0]))
@@ -62,10 +64,10 @@ def test_distant_chunk_keeps_no_retrieval(routing, monkeypatch):
 
 
 def test_classifier_yes_retrieves_from_the_closest_chunks_source(routing, monkeypatch):
-    """Verify a 'retrieve' vote searches the closest chunk's source even when that chunk is below the threshold."""
+    """Verify a 'retrieve' vote searches the closest chunk's source even when that chunk is below the threshold (but above the floor)."""
     vectorstore, retrieved_from = routing
     monkeypatch.setattr(classifier, "predict_needs_retrieval_with_confidence", lambda emb: (True, 0.60))
-    monkeypatch.setattr(corpus_probe, "probe_corpus", lambda emb, vs: ("ingested/batch/quokka.txt", 0.40))
+    monkeypatch.setattr(corpus_probe, "probe_corpus", lambda emb, vs: ("ingested/batch/quokka.txt", 0.50))
 
     rag_agent.answer_question(QUESTION, None, vectorstore, FakeLLM())
     assert retrieved_from == ["ingested/batch/quokka.txt"]
