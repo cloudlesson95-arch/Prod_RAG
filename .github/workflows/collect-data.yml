@@ -87,18 +87,25 @@ jobs:
 
       - name: Point the CLI at the state store and the app
         run: |
-          echo "LOCAL_DIR=$RUNNER_TEMP/state/.local" >> "$GITHUB_ENV"
-          echo "DATA_DIR=$RUNNER_TEMP/state/data" >> "$GITHUB_ENV"
+          # Lookups first, as commands of their own, so a failed az/aws call fails the step
           if [ "${{ matrix.cloud }}" = "azure" ]; then
-            echo "STATE_BACKEND=azure_blob" >> "$GITHUB_ENV"
-            echo "AZURE_STORAGE_ACCOUNT_URL=$(az storage account list -g ${{ vars.RESOURCE_GROUP }} --query '[0].primaryEndpoints.blob' -o tsv)" >> "$GITHUB_ENV"
-            echo "APP_URL=${{ vars.DEPLOYED_APP_URL }}" >> "$GITHUB_ENV"
+            ACCOUNT_URL=$(az storage account list -g ${{ vars.RESOURCE_GROUP }} --query '[0].primaryEndpoints.blob' -o tsv)
           else
-            echo "STATE_BACKEND=s3" >> "$GITHUB_ENV"
-            echo "S3_STATE_BUCKET=${{ vars.AWS_STATE_BUCKET }}" >> "$GITHUB_ENV"
-            URL=$(aws lambda get-function-url-config --function-name ragprod-api --query FunctionUrl --output text)
-            echo "APP_URL=${URL%/}" >> "$GITHUB_ENV"
+            FUNCTION_URL=$(aws lambda get-function-url-config --function-name ragprod-api --query FunctionUrl --output text)
           fi
+          {
+            echo "LOCAL_DIR=$RUNNER_TEMP/state/.local"
+            echo "DATA_DIR=$RUNNER_TEMP/state/data"
+            if [ "${{ matrix.cloud }}" = "azure" ]; then
+              echo "STATE_BACKEND=azure_blob"
+              echo "AZURE_STORAGE_ACCOUNT_URL=$ACCOUNT_URL"
+              echo "APP_URL=${{ vars.DEPLOYED_APP_URL }}"
+            else
+              echo "STATE_BACKEND=s3"
+              echo "S3_STATE_BUCKET=${{ vars.AWS_STATE_BUCKET }}"
+              echo "APP_URL=${FUNCTION_URL%/}"
+            fi
+          } >> "$GITHUB_ENV"
 
       - name: Collect release notes
         env:
@@ -137,7 +144,7 @@ jobs:
         if: steps.ingest.outputs.published == 'true'
         run: |
           EXPECTED=$(jq -r .state_version result.json)
-          for i in $(seq 1 60); do
+          for _ in $(seq 1 60); do
             CURRENT=$(curl -s --max-time 30 "$APP_URL/health" | jq -r .state_version 2>/dev/null || true)
             if [ "$CURRENT" = "$EXPECTED" ]; then
               echo "The app serves snapshot $CURRENT"
