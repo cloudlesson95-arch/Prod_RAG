@@ -305,6 +305,16 @@ if (Test-AwsResourceExists -CmdArgs @("iam", "get-role", "--role-name", $githubR
 }
 $githubRoleArn = "arn:aws:iam::${awsAccountId}:role/$githubRoleName"
 
+# Applied on every run, like the Lambda's: the scheduled collect-data workflow reads and publishes state snapshots
+$tempGithubStatePolicy = [System.IO.Path]::GetTempFileName()
+try {
+    Write-JsonFileNoBOM -FilePath $tempGithubStatePolicy -JsonContent $stateAccessPolicy
+    Invoke-AwsCmd -CmdArgs @("iam", "put-role-policy", "--role-name", $githubRoleName, "--policy-name", "StateSnapshotAccess", "--policy-document", "file://$tempGithubStatePolicy") | Out-Null
+    Write-Host "   State snapshot access applied to '$githubRoleName'." -ForegroundColor Green
+} finally {
+    Remove-Item $tempGithubStatePolicy -ErrorAction SilentlyContinue
+}
+
 Write-Host "`n=== AWS INFRASTRUCTURE & OIDC SETUP COMPLETE ===" -ForegroundColor Green
 Write-Host "Add the following SECRETS to your GitHub Repository (Settings -> Secrets and variables -> Actions):" -ForegroundColor Yellow
 Write-Host "AWS_ROLE_TO_ASSUME:    $githubRoleArn"

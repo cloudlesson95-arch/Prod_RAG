@@ -107,6 +107,10 @@ az role assignment create --assignee $appId --role "Contributor" --scope $rgId 2
 # Grant AcrPush on ACR to GitHub Actions
 az role assignment create --assignee $appId --role "AcrPush" --scope $acrId 2>$null | Out-Null
 
+# Grant the scheduled collect-data workflow read/write access to the state snapshots
+# (Contributor covers the control plane only; blob contents need a data-plane role)
+az role assignment create --assignee $appId --role "Storage Blob Data Contributor" --scope $stateContainerId 2>$null | Out-Null
+
 # Create Federated Credentials for standard subject format
 $fedCreds = az ad app federated-credential list --id $appId -o json | ConvertFrom-Json
 $fedExists = $fedCreds | Where-Object { $_.name -eq "github-actions-main" }
