@@ -5,14 +5,15 @@
 
 A production-oriented continuation of [Simple_RAG](https://github.com/cloudlesson95-arch/Simple_RAG). The core pipeline (hybrid search, cross-encoder re-ranking, multi-hop agent, classical ML routing, semantic cache, LLM-as-judge evaluation) is documented in the [Simple_RAG README](https://github.com/cloudlesson95-arch/Simple_RAG#readme). This repository adds an MCP server, pluggable secrets, monitoring, persistent state, and automated deployment of one Docker image to **Azure Container Apps** and **AWS Lambda**.
 
-> 🚧 Work in progress: Phases 1–6 are done, Phases 7–8 are planned.
+> 🚧 Work in progress: Phases 1–7 are done, Phase 8 is planned.
 
 ## Architecture
 
 ```
 GitHub Actions (OIDC, no stored cloud credentials)
-  ├── evaluate.yml   build image → offline evaluation gate
-  └── deploy.yml     build image → push → deploy → /health warmup → live evaluation gate
+  ├── evaluate.yml      build image → offline evaluation gate
+  ├── collect-data.yml  daily: release notes → ingest-batch per cloud → restart → live evaluation gate
+  └── deploy.yml        build image → push → deploy → /health warmup → live evaluation gate
                           │                                  │
                           ▼                                  ▼
             Azure Container Apps                   AWS Lambda (container image)
@@ -36,7 +37,7 @@ Same image in both clouds: FastAPI (/health, /query, /demo/documents, /docs) + M
 | 4. Multi-cloud deployment | ✅ Done | One image to Azure and AWS through GitHub Actions with OIDC; setup and teardown scripts; a live evaluation gate after every deploy |
 | 5. Persistent storage | ✅ Done | Corpus, index, document registry and router models live in a versioned snapshot (Azure Blob / S3), restored at startup and published after every write |
 | 6. Ingestion | ✅ Done | Public demo sandbox: upload a .txt, .md or .pdf and ask questions about that one document. Admin `ingest-batch`: index an inbox folder into the shared corpus as one snapshot. A corpus probe makes new documents reachable through the classical router |
-| 7. Scheduled data pipeline | Planned | Scheduled `ingest-batch` (GitHub release notes) and a retrieval classifier that learns from the corpus |
+| 7. Scheduled data pipeline | ✅ Done | Daily `collect-data` workflow: the latest Pydantic AI release notes go through `ingest-batch` in both clouds, followed by a restart and the evaluation gates. Every batch has the LLM write questions per document; the retrieval classifier trains on them, and a routing guard refuses batches that would misroute benchmark questions |
 | 8. Web frontend | Planned | Next.js chat, demo sandbox and dashboard pages |
 
 **Design notes**
@@ -44,8 +45,9 @@ Same image in both clouds: FastAPI (/health, /query, /demo/documents, /docs) + M
 - **One image, two runtimes.** Lambda runs the container as a non-root user on a read-only filesystem. The models are baked into the image at build time and all writable state lives under `/tmp/state`, so the same image runs unchanged in both clouds.
 - **Persistent state.** Each instance restores the latest snapshot to local disk at startup; on the very first boot it publishes the image's seed corpus and prebuilt index as snapshot #1. A write publishes a new snapshot only if nobody else published first (ETag conditional writes), so a stale instance can never overwrite newer state. If the store is unreachable at startup, the app serves the seed read-only instead of failing. Snapshots rather than a mounted volume keep queries on local disk (SQLite is unreliable on network filesystems) and need no VPC or NAT gateway on Lambda. The semantic cache is deliberately not persisted, so every deploy's evaluation gate tests the real pipeline. Old versions are kept 30 days for rollback.
 - **Evaluation gates.** `evaluate.yml` runs the offline benchmark inside the image on every push and pull request. `deploy.yml` deploys to both clouds, waits for `/health`, then runs `live-eval` against each deployment. Both fail below 80% Precision@k.
-- **Two ingestion lanes.** Public requests never write shared state. The demo sandbox keeps each upload in its own in-memory collection (30 idle minutes, 20 documents and 5 uploads per minute per instance) and answers only from that document. Shared documents go through `ingest-batch`, which only someone with write access to the state store can run: it starts from the latest snapshot, checks every file before writing anything, embeds only new or changed files and publishes one snapshot per batch.
-- **Routing new documents.** The retrieval classifier is trained on fixed example questions and never sees the corpus, so on its own it sends most questions about new documents straight to the LLM. When it says "no retrieval", a corpus probe looks up the closest chunk; at a cosine similarity of `CORPUS_PROBE_THRESHOLD` (0.55, measured) or more the question is retrieved anyway, from the source the centroid router picks.
+- **Two ingestion lanes.** Public requests never write shared state. The demo sandbox keeps each upload in its own in-memory collection (30 idle minutes, 20 documents and 5 uploads per minute per instance) and answers only from that document. Shared documents go through `ingest-batch`, which only identities with write access to the state store can run (you, and the daily `collect-data` workflow): it starts from the latest snapshot, checks every file before writing anything, embeds only new or changed files and publishes one snapshot per batch.
+- **Routing.** One function, `decide_route()` in `src/routing/router.py`, decides for `/query`, the MCP `route_query` tool and the checks below. The retrieval classifier is trained on the benchmark questions plus questions the LLM wrote for every indexed document, against chit-chat and general-knowledge questions, so it changes with the corpus. An exact corpus probe finds the closest chunk: at a cosine similarity of `CORPUS_PROBE_THRESHOLD` (0.55, measured) or more it overrules the classifier's "no retrieval", and that chunk's source is the one searched. A question that names an indexed release (`v2.51.0`) goes to that release's notes and retrieves only its chunks, because embeddings don't tell version numbers apart.
+- **Publish guard.** After retraining, `ingest-batch` checks that every benchmark question still routes to its own source (and the general one to no retrieval). If not, nothing is published, and the CLI names the questions the new document would capture.
 
 ## Local setup
 
@@ -60,7 +62,7 @@ python -m src.app index                          # builds the index and the rout
 python -m src.app serve                          # http://localhost:8000/docs
 ```
 
-Other commands: `query "<question>"`, `evaluate`, `history`, `live-eval --target-url <url>`, `ingest-batch [--dir inbox]`, `state status`, `state pull`, `get-secret <name>`.
+Other commands: `query "<question>"`, `evaluate`, `history`, `live-eval --target-url <url> [--questions <file> --report-only]`, `ingest-batch [--dir inbox] [--skip-questions]`, `collect-releases [--repo owner/name]`, `questions export --out <file>`, `routing-report`, `state status`, `state pull`, `get-secret <name>`.
 
 To change dependencies, edit `requirements.in` (or `requirements-dev.in`), recompile with the command in its header, then run the `uv pip sync` line again. Recompiling keeps the existing pins unless you pass `--upgrade-package <name>`.
 
@@ -89,21 +91,23 @@ Every setting has a working local default, and the cloud values are set by `infr
 | `STATE_BACKEND` | `local` | `local`, `azure_blob` (with `AZURE_STORAGE_ACCOUNT_URL`) or `s3` (with `S3_STATE_BUCKET`) |
 | `LOCAL_DIR`, `DATA_DIR` | `<repo>/.local`, `<repo>/data` | Working copy of the index and databases, and of the corpus |
 | `MCP_DNS_REBINDING_PROTECTION` | `true` | Set to `false` when `/mcp` is served behind a public hostname |
-| `CORPUS_PROBE_THRESHOLD` | `0.55` | Closest-chunk similarity at which a question is retrieved although the classifier says no; re-measure after large batches |
+| `CORPUS_PROBE_THRESHOLD` | `0.55` | Closest-chunk similarity at which a question is retrieved although the classifier says no; re-measure with `routing-report` after large batches |
+| `QUESTION_GEN_PAUSE_SECONDS` | `0` | Pause between the LLM calls that write questions during `ingest-batch`; raise it if the LLM's rate limit bites |
+| `GENERATE_VISUALIZATION` | `true` | t-SNE picture of the index on every retrain; the scheduled workflow turns it off |
 | `APPLICATIONINSIGHTS_CONNECTION_STRING` | – | Enables Azure Monitor telemetry |
 
 ## Deploy to Azure and AWS
 
 Prerequisites: PowerShell, the Azure CLI signed in (`az login`) with permission to create role assignments and app registrations, the AWS CLI with an admin profile, and your own GitHub copy of this repository (pass `-GitHubRepo <owner>/<repo>` to both setup scripts).
 
-1. Run `.\infra\azure\setup.ps1`, then `$env:AWS_PROFILE = "<admin-profile>"; .\infra\aws\setup.ps1`. Both ask for the Groq and Google API keys and print the values for the next step.
+1. Run `.\infra\azure\setup.ps1`, then `$env:AWS_PROFILE = "<admin-profile>"; .\infra\aws\setup.ps1`. Both ask for the Groq and Google API keys and print the values for the next step. They also give the GitHub Actions identities read/write access to the state snapshots, which the daily data workflow needs.
 2. Add those values in GitHub → Settings → Secrets and variables → Actions:
 
    | Secrets | Variables |
    |---|---|
    | `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` | `RESOURCE_GROUP`, `ACR_NAME`, `CONTAINER_APP_NAME`, `DEPLOYED_APP_URL` |
    | `AWS_ROLE_TO_ASSUME` | `AWS_REGION`, `AWS_ECR_REPO`, `AWS_LAMBDA_ROLE_ARN`, `AWS_STATE_BUCKET` |
-   | `GROQ_API_KEY`, `GOOGLE_API_KEY` (used by the evaluation gates) | |
+   | `GROQ_API_KEY`, `GOOGLE_API_KEY` (used by the evaluation gates and the question generator) | `COLLECT_REPO` (optional, default `pydantic/pydantic-ai`) |
 
 3. Push to `main`, or run the Deploy workflow manually (targeting `azure`, `aws` or `both`). The first AWS run creates the Lambda function and its Function URL.
 
@@ -152,7 +156,21 @@ Remove-Item Env:STATE_BACKEND, Env:S3_STATE_BUCKET, Env:AWS_REGION, Env:LOCAL_DI
 
 `ingest-batch` restores the latest snapshot into the scratch folders, reports files it can't read (exit code 1), embeds only new or changed files and publishes one snapshot; running it again with the same inbox publishes nothing. Running apps keep the previous snapshot until restarted, which is what the restart commands do: on Lambda any configuration change retires the warm instances, and the Azure revision restart takes about a minute after it reports success. Check `/health` (`state_version`) and then `/query`, since `/health` doesn't load the router models. Run `live-eval` afterwards, since new documents can change routing. To remove a document, `state pull` into scratch folders, delete it from `DATA_DIR/ingested/batch/`, run `index` (it publishes), then restart the app. Never point a batch at the folders of a running local server: the restore replaces the index under it.
 
+Every batch also has the LLM write five questions per new or changed document, and fills them in for indexed documents that have none yet. This uses your Groq key; `--skip-questions` leaves it out, and a later batch catches up. The retrieval classifier retrains on these questions in the same snapshot. Before publishing, the routing guard checks the benchmark questions: a document that would capture one is refused, and the CLI names the question. `routing-report` on the same scratch folders shows how the benchmark and fixture questions route. Don't run a batch while the Collect Data workflow is running for the same cloud: the later publish fails with `SnapshotConflict`, so run it again.
+
 Run it from a venv synced with the lock (see Local setup): `ingest-batch` and `index` refuse to publish when scikit-learn, numpy, joblib or chromadb differ from `requirements.txt`, because the snapshot carries their file formats.
+
+### Scheduled data pipeline
+
+`.github/workflows/collect-data.yml` runs daily at 06:17 UTC, and on demand from Actions → Collect Data → Run workflow (choose `azure`, `aws` or `both`, and whether to skip the LLM questions). For each cloud, on a fresh GitHub runner, it:
+
+1. writes the latest 10 releases of `COLLECT_REPO` into one inbox file, for example `pydantic-pydantic-ai-releases.md` (`collect-releases`);
+2. runs `ingest-batch` against that cloud's state store, signed in through OIDC;
+3. if a snapshot was published: restarts the app, waits until `/health` reports the new `state_version`, sends a `/query` smoke test, runs the live evaluation gate, and asks the new documents' generated questions as a report-only synthetic evaluation.
+
+A day without a new release publishes nothing and takes a couple of minutes. The job summary shows the batch result, and the run's artifact keeps the inbox file and the result JSON. To pause the pipeline, disable the workflow in the Actions tab (or `gh workflow disable "Collect Data"`).
+
+The release notes are one source with a 10-release window: a new release replaces the oldest, so the corpus doesn't grow. Every change line starts with its release (`* [v2.51.0] …`) and the newest release is labelled as the latest, so questions about the latest release or a named version are answered from the right release.
 
 ### Teardown
 
@@ -164,13 +182,16 @@ Disable the Deploy workflow first (otherwise the next push re-creates the Lambda
 - Both clouds scale to zero, so the first request after an idle period can take a minute or more.
 - On Lambda, a warm instance can serve an older snapshot for a while after a write made elsewhere.
 - Editing the seed files in `data/` doesn't change an existing snapshot; add or update documents as described above.
-- After `ingest-batch`, running instances serve the previous snapshot until they restart.
+- After a manual `ingest-batch`, running instances serve the previous snapshot until they restart (the scheduled workflow restarts them itself).
 - Demo documents live in one instance's memory: a restart, scale-to-zero or 30 idle minutes removes them, and on Lambda a follow-up question can reach another instance and get a 404 (upload again). The 2 MB upload limit is checked after the request body has arrived; the platform caps the request itself (6 MB on Lambda).
 - The demo's `groundedness_score` is the similarity between the answer and the retrieved text: it flags answers that drift off topic, not wrong facts, and short correct answers score low.
-- Routing to new documents: in measurements the corpus probe made 7 of 11 questions about new documents retrievable; borderline wordings still go to the LLM without retrieval. The MCP `route_query` tool reports only the classifier's decision, so it can disagree with `/query`. With `ROUTING_METHOD=llm`, ingested documents are unreachable (the LLM router's source list is fixed).
+- Routing to new documents: in measurements, questions about a new document reached retrieval 11 of 11 times once it had generated questions, and 9 of 10 for a document without them; borderline wordings can still go to the LLM without retrieval. With `ROUTING_METHOD=llm`, ingested documents are unreachable (the LLM router's source list is fixed), and the multi-hop agent's second hop can only target the seed files.
+- Release notes: only releases inside the 10-release window are known, and a question that names no version ("Which release added GPT-Live?") can name the wrong release.
+- The routing guard has no override: if a new document should legitimately answer a benchmark question, update `baseline/questions.json` first.
+- GitHub pauses scheduled workflows after 60 days without repository activity; re-enable Collect Data in the Actions tab.
 - On Groq's free tier (8,000 tokens per minute for `gpt-oss-20b`), bursts of expensive questions, such as a `live-eval` run, can hit the rate limit. The API then answers 500 instead of retrying.
 - The semantic cache is per instance and starts empty after every deploy (by design).
-- `live-eval` stores its results in the `rag.db` of the machine that runs it, not in the deployed state.
+- `live-eval` stores its results in the `rag.db` of the machine that runs it, not in the deployed state, so the scheduled workflow's live and synthetic scores appear only in its job logs.
 - Every deploy pushes a multi-GB image to both registries; delete old tags periodically.
 
 ## License
