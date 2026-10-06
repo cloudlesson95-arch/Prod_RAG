@@ -3,22 +3,26 @@ from src.evaluation.evaluator import load_questions, judge_answer
 from src.evaluation.eval_db import save_eval_run
 from src.config import EVAL_QUESTIONS_PATH, DB_PATH, EVAL_LLM_MODEL, K_EVALUATION, ROUTING_METHOD
 from src.core.utils import create_llm
+from src.storage.question_store import get_current_questions
 from src.logging_config import setup_logging
 
 logger = setup_logging(__name__)
 
 
-def run_live_evaluation(target_url: str, revision: str | None = None) -> tuple[int, float, bool]:
+def run_live_evaluation(target_url: str, revision: str | None = None, questions_path: str = EVAL_QUESTIONS_PATH,
+                        run_type: str = "live") -> tuple[int, float, bool]:
     """Run evaluation against a deployed endpoint via HTTP POST /query.
-    
+
     Args:
         target_url: Base URL of the target RAG API endpoint (e.g. http://localhost:8000).
         revision: Optional git SHA or deployment release version.
-        
+        questions_path: Question file in baseline/questions.json format (default: the benchmark).
+        run_type: Stored with the run: "live" for the benchmark gate, "synthetic" for generated questions.
+
     Returns:
         tuple: (run_id: int, precision_score: float, passed_threshold: bool)
     """
-    questions = load_questions(EVAL_QUESTIONS_PATH)
+    questions = load_questions(questions_path)
     logger.info(f"Running live evaluation against '{target_url}' ({len(questions)} test questions)...")
 
     judge_llm = create_llm(EVAL_LLM_MODEL)
@@ -74,8 +78,19 @@ def run_live_evaluation(target_url: str, revision: str | None = None) -> tuple[i
         successful_questions=successful_retrievals,
         passed_threshold=passed_threshold,
         question_results=question_results,
-        run_type="live",
+        run_type=run_type,
         revision=revision,
     )
     logger.info(f"Saved live evaluation metrics to DB (Run ID #{run_id})")
     return run_id, precision, passed_threshold
+
+
+def synthetic_questions(sources: list[str] | None = None) -> list[dict]:
+    """Stored generated questions in the baseline/questions.json format, optionally for some sources only.
+
+    Each comes with an expected answer and the chunk it was written from, so live-eval can ask and judge them
+    like the benchmark: an eval set for documents nobody wrote test questions for.
+    """
+    rows = [row for row in get_current_questions() if not sources or row["source"] in sources]
+    return [{"id": i, "source_doc": row["source"], "query": row["question"], "expected_context": row["context"],
+             "expected_answer": row["answer"], "is_adversarial": False} for i, row in enumerate(rows, 1)]

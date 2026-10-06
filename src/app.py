@@ -59,6 +59,20 @@ def main():
     live_eval_parser = subparsers.add_parser("live-eval", help="Run evaluation against a live deployment")
     live_eval_parser.add_argument("--target-url", required=True, help="Target API URL (e.g. http://localhost:8000)")
     live_eval_parser.add_argument("--revision", default=None, help="Git SHA or release tag")
+    live_eval_parser.add_argument("--questions", default=None,
+                                  help="Question file in baseline/questions.json format, saved as a synthetic run "
+                                       "(default: the benchmark, saved as live)")
+    live_eval_parser.add_argument("--report-only", action="store_true",
+                                  help="Exit 0 even when the score is below the 80%% pass threshold "
+                                       "(the score is still logged and saved)")
+
+    # Generated questions command
+    questions_parser = subparsers.add_parser("questions", help="Work with the questions ingest-batch generated")
+    questions_parser.add_argument("action", choices=["export"],
+                                  help="export: write them in baseline/questions.json format, for live-eval --questions")
+    questions_parser.add_argument("--out", required=True, help="JSON file to write")
+    questions_parser.add_argument("--source", action="append", default=None,
+                                  help="Only this document's questions (repeatable; default: all)")
 
     # State snapshot commands
     state_parser = subparsers.add_parser("state", help="Inspect or restore the persistent state snapshot")
@@ -202,12 +216,25 @@ def main():
  
     elif args.command == "live-eval":
         import sys
+        from src.config import EVAL_QUESTIONS_PATH
         from src.evaluation.live_evaluator import run_live_evaluation
-        run_id, precision, passed = run_live_evaluation(args.target_url, args.revision)
-        if not passed:
+        run_id, precision, passed = run_live_evaluation(
+            args.target_url, args.revision,
+            questions_path=args.questions or EVAL_QUESTIONS_PATH,
+            run_type="synthetic" if args.questions else "live",
+        )
+        if not passed and not args.report_only:
             sys.exit(1)
         else:
             sys.exit(0)
+
+    elif args.command == "questions":
+        import json
+        from src.evaluation.live_evaluator import synthetic_questions
+        questions = synthetic_questions(args.source)
+        with open(args.out, "w", encoding="utf-8") as f:
+            json.dump(questions, f, indent=2, ensure_ascii=False)
+        print(f"Wrote {len(questions)} questions to {args.out}")
 
     elif args.command == "state":
         import sys
