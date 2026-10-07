@@ -1,9 +1,10 @@
 import requests
 from src.evaluation.evaluator import load_questions, judge_answer
 from src.evaluation.eval_db import save_eval_run
-from src.config import EVAL_QUESTIONS_PATH, DB_PATH, EVAL_LLM_MODEL, K_EVALUATION, ROUTING_METHOD
+from src.config import EVAL_QUESTIONS_PATH, DB_PATH, EVAL_LLM_MODEL, K_EVALUATION, ROUTING_METHOD, LIVE_EVAL_CLIENT
 from src.core.utils import create_llm
 from src.storage.question_store import get_current_questions
+from src.storage.event_store import get_event_store
 from src.logging_config import setup_logging
 
 logger = setup_logging(__name__)
@@ -33,7 +34,8 @@ def run_live_evaluation(target_url: str, revision: str | None = None, questions_
     for i, q in enumerate(questions):
         logger.info(f"[{i+1}/{len(questions)}] Live Testing: '{q['query']}'")
         try:
-            response = requests.post(endpoint, json={"question": q["query"]}, timeout=60)
+            response = requests.post(endpoint, json={"question": q["query"]}, headers={"X-RAG-Client": LIVE_EVAL_CLIENT},
+                                     timeout=60)
             response.raise_for_status()
             answer = response.json().get("answer", "")
 
@@ -82,7 +84,23 @@ def run_live_evaluation(target_url: str, revision: str | None = None, questions_
         revision=revision,
     )
     logger.info(f"Saved live evaluation metrics to DB (Run ID #{run_id})")
+    record_eval_run({
+        "run_type": run_type, "revision": revision, "target_url": target_url, "eval_model": EVAL_LLM_MODEL,
+        "precision_score": precision, "total_questions": len(questions),
+        "successful_questions": successful_retrievals, "passed_threshold": passed_threshold,
+        "results": question_results,
+    })
     return run_id, precision, passed_threshold
+
+
+def record_eval_run(record: dict) -> None:
+    """Store a run in the event store next to the configured state, so the dashboard can show it after this machine
+    is gone: in the CI gates, that's the target cloud's store. Never changes the run's result."""
+    try:
+        get_event_store().put("eval_run", record)
+        logger.info("Stored the run as an eval_run event")
+    except Exception as e:
+        logger.warning(f"[Events] Eval run not stored: {e}")
 
 
 def synthetic_questions(sources: list[str] | None = None) -> list[dict]:

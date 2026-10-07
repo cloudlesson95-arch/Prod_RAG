@@ -8,6 +8,13 @@ from src.evaluation.live_evaluator import run_live_evaluation
 from src.evaluation.eval_db import get_eval_history, save_eval_run
 
 
+@pytest.fixture(autouse=True)
+def stored_events(monkeypatch, fake_event_store):
+    """Every run here goes to an in-memory event store, never to the real LOCAL_DIR/events."""
+    monkeypatch.setattr(live_evaluator, "get_event_store", lambda: fake_event_store)
+    return fake_event_store
+
+
 def test_live_evaluation_with_mocked_http_and_judge(tmp_path):
     db_path = str(tmp_path / "test_eval.db")
 
@@ -71,3 +78,42 @@ def test_synthetic_questions_use_the_benchmark_format_and_filter_by_source(monke
          "expected_answer": "A1", "is_adversarial": False}
     ]
     assert len(live_evaluator.synthetic_questions()) == 2
+
+
+ONE_QUESTION = {"id": 1, "query": "What is a group of cats called?", "expected_answer": "A clowder."}
+
+
+def run_once(tmp_path):
+    """One benchmark question, answered and judged correct, against a fake deployment."""
+    response = MagicMock()
+    response.json.return_value = {"answer": "A clowder."}
+    with patch("src.evaluation.live_evaluator.load_questions", return_value=[ONE_QUESTION]), \
+         patch("src.evaluation.live_evaluator.create_llm", return_value=MagicMock()), \
+         patch("src.evaluation.live_evaluator.judge_answer", return_value=True), \
+         patch("requests.post", return_value=response) as post, \
+         patch("src.evaluation.live_evaluator.DB_PATH", str(tmp_path / "eval.db")):
+        return run_live_evaluation("https://app.example.io", revision="abc1234"), post
+
+
+def test_run_is_stored_as_an_eval_run_event_and_marks_its_requests(tmp_path, stored_events):
+    """Verify live-eval marks its /query requests and stores the run, answers included, for the dashboard."""
+    _, post = run_once(tmp_path)
+
+    assert post.call_args.kwargs["headers"] == {"X-RAG-Client": "live-eval"}
+    [(kind, record)] = stored_events.records
+    assert kind == "eval_run"
+    assert {key: record[key] for key in ("run_type", "revision", "target_url", "precision_score", "passed_threshold")} == {
+        "run_type": "live", "revision": "abc1234", "target_url": "https://app.example.io",
+        "precision_score": 100.0, "passed_threshold": True}
+    assert record["results"] == [{"id": 1, "query": "What is a group of cats called?", "passed": True,
+                                  "llm_answer": "A clowder."}]
+
+
+def test_a_failing_event_store_does_not_change_the_result(tmp_path, stored_events):
+    """Verify the gate's result doesn't depend on the dashboard's storage."""
+    stored_events.fail = True
+
+    (run_id, precision, passed), _ = run_once(tmp_path)
+
+    assert (precision, passed) == (100.0, True)
+    assert stored_events.records == []

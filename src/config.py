@@ -115,6 +115,11 @@ MCP_DNS_REBINDING_PROTECTION = os.getenv("MCP_DNS_REBINDING_PROTECTION", "true")
 # "Variables={...}" shorthand splits on commas. Empty allows none. Trailing slashes are dropped (browsers send none).
 CORS_ALLOW_ORIGINS = [origin.rstrip("/") for origin in os.getenv("CORS_ALLOW_ORIGINS", "http://localhost:3000").split()]
 
+# Git SHA of the deployed build (deploy.yml sets it; empty locally), shown in /health and stamped on routing events
+APP_REVISION = os.getenv("APP_REVISION", "")
+# X-RAG-Client header value that marks live-eval's /query requests, so the routing stats can leave them out
+LIVE_EVAL_CLIENT = "live-eval"
+
 # Demo sandbox: public single-document Q&A, held in memory per instance and never persisted
 DEMO_MAX_FILE_BYTES = 2 * 1024 * 1024
 DEMO_MAX_TEXT_CHARS = 200_000

@@ -43,6 +43,24 @@ def fake_store():
     return FakeStateStore()
 
 
+class FakeEventStore:
+    """Collects put() calls in memory; set fail = True to simulate an unreachable store."""
+
+    def __init__(self):
+        self.records: list[tuple[str, dict]] = []
+        self.fail = False
+
+    def put(self, kind, record, now=None):
+        if self.fail:
+            raise ConnectionError("event store unreachable")
+        self.records.append((kind, record))
+
+
+@pytest.fixture
+def fake_event_store():
+    return FakeEventStore()
+
+
 @pytest.fixture
 def azurite_container():
     """Create a throwaway container in Azurite and delete it after the test."""

@@ -3,21 +3,22 @@ from dataclasses import asdict
 import os
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from src.logging_config import setup_logging
 from src.config import (
     MAIN_LLM_MODEL, DEMO_MAX_FILE_BYTES, DEMO_MAX_TEXT_CHARS, DEMO_TTL_SECONDS, DEMO_RATE_LIMIT_PER_MINUTE,
-    CORS_ALLOW_ORIGINS,
+    CORS_ALLOW_ORIGINS, APP_REVISION, LIVE_EVAL_CLIENT,
 )
 from src.core.utils import create_llm
 from src.core.vectorstore import create_or_get_vectorstore
-from src.core.rag_agent import Passage, setup_router, answer_question
+from src.core.rag_agent import AnswerResult, Passage, setup_router, answer_question
 from src.core.mcp_server import mcp
 from src.monitoring.telemetry import configure_telemetry
 from src.storage.state_sync import initialize_state, read_local_version, read_only_reason
+from src.storage.event_store import get_event_store
 from src.core.rate_limit import RateLimiter
 from src.ingestion.demo import DemoStore, answer_from_document
 from src.ingestion.errors import IngestError
@@ -33,13 +34,15 @@ router = None
 vectorstore = None
 answer_llm = None
 demo_store = None
+event_store = None
 demo_upload_limiter = RateLimiter(DEMO_RATE_LIMIT_PER_MINUTE)
 
 
 def startup_event():
-    global router, vectorstore, answer_llm, demo_store
+    global router, vectorstore, answer_llm, demo_store, event_store
     logger.info("Initializing RAG components for API...")
     initialize_state()  # must run before anything opens Chroma
+    event_store = get_event_store()  # next to the state store: routing events for the dashboard
     router = setup_router()
     vectorstore = create_or_get_vectorstore()
     demo_store = DemoStore(vectorstore.embeddings)  # reuses the loaded embedding model
@@ -88,17 +91,39 @@ def health_check():
     return {
         "status": "ok",
         "model": MAIN_LLM_MODEL,
+        "revision": APP_REVISION or None,
         "state_version": read_local_version(),
         "read_only": read_only_reason() is not None,
     }
 
+def record_routing_event(result: AnswerResult, client: str | None) -> None:
+    """Store one /query decision for the dashboard's routing stats. Runs after the response is sent; never fails it.
+
+    No question text: these are public users' inputs. live-eval marks its requests, so the stats can leave them out.
+    """
+    try:
+        event_store.put("routing", {
+            "source": result.source,
+            "route_reason": result.route_reason,
+            "router_confidence": result.router_confidence,
+            "probe_similarity": result.probe_similarity,
+            "groundedness_score": result.groundedness_score,
+            "cache_hit": result.cache_hit,
+            "origin": LIVE_EVAL_CLIENT if client == LIVE_EVAL_CLIENT else "user",
+            "revision": APP_REVISION or None,
+        })
+    except Exception as e:
+        logger.warning(f"[Events] Routing event not stored: {e}")
+
 @app.post("/query", response_model = QueryResponse)
-def query_rag(request: QueryRequest):
+def query_rag(request: QueryRequest, background_tasks: BackgroundTasks,
+              x_rag_client: str | None = Header(default=None, include_in_schema=False)):
     if not request.question.strip():
         raise HTTPException(status_code = 400, detail="Question cannot be empty")
 
     try:
         result = answer_question(request.question, router, vectorstore, answer_llm)
+        background_tasks.add_task(record_routing_event, result, x_rag_client)
         return QueryResponse(question=request.question, **asdict(result))
     except Exception as e:
         logger.error(f"Error processing query: {str(e)}", exc_info=True)

@@ -16,9 +16,10 @@ def startup_calls(monkeypatch):
         return SimpleNamespace(embeddings="loaded-embeddings")
 
     # startup_event rebinds these globals; registering them with monkeypatch restores the originals after the test
-    for name in ("router", "vectorstore", "answer_llm", "demo_store"):
+    for name in ("router", "vectorstore", "answer_llm", "demo_store", "event_store"):
         monkeypatch.setattr(api, name, None)
     monkeypatch.setattr(api, "initialize_state", lambda: calls.append("state"))
+    monkeypatch.setattr(api, "get_event_store", lambda: calls.append("events"))
     monkeypatch.setattr(api, "setup_router", lambda: calls.append("router"))
     monkeypatch.setattr(api, "create_or_get_vectorstore", fake_vectorstore)
     monkeypatch.setattr(api, "create_llm", lambda model: calls.append("llm"))
