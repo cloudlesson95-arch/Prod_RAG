@@ -111,6 +111,10 @@ S3_STATE_BUCKET = os.getenv("S3_STATE_BUCKET", "")
 # which is right for a local server; public deployments set this to false (main.bicep, deploy.yml).
 MCP_DNS_REBINDING_PROTECTION = os.getenv("MCP_DNS_REBINDING_PROTECTION", "true").lower() in ("1", "true", "yes")
 
+# Browser origins allowed to call the API (the web frontend), separated by spaces: deploy.yml's Lambda
+# "Variables={...}" shorthand splits on commas. Empty allows none. Trailing slashes are dropped (browsers send none).
+CORS_ALLOW_ORIGINS = [origin.rstrip("/") for origin in os.getenv("CORS_ALLOW_ORIGINS", "http://localhost:3000").split()]
+
 # Demo sandbox: public single-document Q&A, held in memory per instance and never persisted
 DEMO_MAX_FILE_BYTES = 2 * 1024 * 1024
 DEMO_MAX_TEXT_CHARS = 200_000

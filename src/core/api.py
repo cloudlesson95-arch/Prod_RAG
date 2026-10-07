@@ -4,11 +4,13 @@ import os
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from src.logging_config import setup_logging
 from src.config import (
     MAIN_LLM_MODEL, DEMO_MAX_FILE_BYTES, DEMO_MAX_TEXT_CHARS, DEMO_TTL_SECONDS, DEMO_RATE_LIMIT_PER_MINUTE,
+    CORS_ALLOW_ORIGINS,
 )
 from src.core.utils import create_llm
 from src.core.vectorstore import create_or_get_vectorstore
@@ -55,6 +57,15 @@ app = FastAPI(
     description = "REST API for Simple RAG pipeline integrated with N8N",
     version = "1.0.0",
     lifespan = lifespan
+)
+
+# The web frontend calls the API from the browser, from another origin. Retry-After is exposed so the demo page
+# can count down after a 429. This wraps the MCP mount too; non-browser MCP clients don't use CORS.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=CORS_ALLOW_ORIGINS,
+    allow_methods=["GET", "POST"],
+    expose_headers=["Retry-After"],
 )
 
 class QueryRequest(BaseModel):
