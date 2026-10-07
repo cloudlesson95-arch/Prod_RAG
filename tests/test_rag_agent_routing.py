@@ -24,7 +24,7 @@ def routing(monkeypatch):
 
     def fake_retrieve_and_answer(query, source_filter, vectorstore, answer_llm):
         retrieved_from.append(source_filter)
-        return "Rottnest Island.", ""
+        return "Rottnest Island.", []
 
     monkeypatch.setattr(rag_agent, "ROUTING_METHOD", "classical")
     monkeypatch.setattr(rag_agent, "ENABLE_SEMANTIC_CACHE", False)
@@ -43,9 +43,10 @@ def test_close_chunk_overrules_no_retrieval_and_picks_its_source(routing, monkey
     monkeypatch.setattr(corpus_probe, "probe_corpus", lambda emb, vs: ("ingested/batch/quokka.txt", 0.75))
     llm = FakeLLM()
 
-    answer = rag_agent.answer_question(QUESTION, None, vectorstore, llm)
+    result = rag_agent.answer_question(QUESTION, None, vectorstore, llm)
 
-    assert answer == "Rottnest Island."
+    assert result.answer == "Rottnest Island."
+    assert (result.source, result.route_reason, result.probe_similarity) == ("ingested/batch/quokka.txt", "probe", 0.75)
     assert retrieved_from == ["ingested/batch/quokka.txt"]
     assert llm.prompts == []
 
@@ -56,9 +57,11 @@ def test_distant_chunk_keeps_no_retrieval(routing, monkeypatch):
     monkeypatch.setattr(corpus_probe, "probe_corpus", lambda emb, vs: ("pydantic.llms-full.txt", 0.43))
     llm = FakeLLM()
 
-    answer = rag_agent.answer_question(QUESTION, None, vectorstore, llm)
+    result = rag_agent.answer_question(QUESTION, None, vectorstore, llm)
 
-    assert answer == "Answered from general knowledge."
+    assert result.answer == "Answered from general knowledge."
+    assert (result.source, result.route_reason, result.router_confidence) == ("none", "no_retrieval", 0.54)
+    assert result.passages == [] and result.groundedness_score is None
     assert retrieved_from == []
     assert llm.prompts == [QUESTION]
 

@@ -52,8 +52,12 @@ def execute_multi_hop_pipeline(
     answer_llm,
     retrieve_fn: Callable[[str, str], List[Any]],
     max_hops: int = MAX_HOPS,
-) -> str:
-    """Execute an iterative multi-hop retrieval loop up to max_hops."""
+) -> tuple[str, List[Any]]:
+    """Execute an iterative multi-hop retrieval loop up to max_hops.
+
+    Returns:
+        tuple[str, list]: (answer, the deduplicated chunks of every hop, which the answer was generated from)
+    """
     current_source = initial_source
     current_query = question
     context_docs = []
@@ -101,4 +105,4 @@ Context:
 Question: {question}
 Answer:"""
 
-    return answer_llm.invoke(prompt).content
+    return answer_llm.invoke(prompt).content, context_docs

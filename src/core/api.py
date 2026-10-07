@@ -1,4 +1,5 @@
 import math
+from dataclasses import asdict
 import os
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
@@ -11,7 +12,7 @@ from src.config import (
 )
 from src.core.utils import create_llm
 from src.core.vectorstore import create_or_get_vectorstore
-from src.core.rag_agent import setup_router, answer_question
+from src.core.rag_agent import Passage, setup_router, answer_question
 from src.core.mcp_server import mcp
 from src.monitoring.telemetry import configure_telemetry
 from src.storage.state_sync import initialize_state, read_local_version, read_only_reason
@@ -62,6 +63,14 @@ class QueryRequest(BaseModel):
 class QueryResponse(BaseModel):
     question: str
     answer: str
+    source: str | None = Field(None, description='Source searched; "none" when answered without retrieval; null on a cache hit')
+    route_reason: str | None = Field(None, description="classifier, probe, version, floor, no_retrieval or llm")
+    router_confidence: float | None = Field(None, description="The classifier's probability for its own vote (uncalibrated)")
+    probe_similarity: float | None = Field(None, description="Cosine similarity of the closest chunk in the corpus")
+    groundedness_score: float | None = Field(None, description="Answer-context similarity: the best passage's cosine "
+                                                               "similarity to the answer (a topic match, not a fact check)")
+    cache_hit: bool = False
+    passages: list[Passage] = Field(default_factory=list, description="Chunks the answer was generated from")
 
 @app.get("/health")
 def health_check():
@@ -78,8 +87,8 @@ def query_rag(request: QueryRequest):
         raise HTTPException(status_code = 400, detail="Question cannot be empty")
 
     try:
-        answer = answer_question(request.question, router, vectorstore, answer_llm)
-        return QueryResponse(question=request.question, answer=answer)
+        result = answer_question(request.question, router, vectorstore, answer_llm)
+        return QueryResponse(question=request.question, **asdict(result))
     except Exception as e:
         logger.error(f"Error processing query: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error processing query")
@@ -97,6 +106,7 @@ class DemoQueryResponse(BaseModel):
     question: str
     answer: str
     groundedness_score: float | None
+    passages: list[Passage] = Field(default_factory=list)
 
 @app.post("/demo/documents", response_model=DemoUploadResponse)
 def upload_demo_document(file: UploadFile = File(...)):

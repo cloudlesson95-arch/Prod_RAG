@@ -167,8 +167,15 @@ def main():
         router = setup_router()
         vectorstore = create_or_get_vectorstore()
         answer_llm = create_llm(MAIN_LLM_MODEL)
-        answer = answer_question(args.question, router, vectorstore, answer_llm)
-        print(answer)
+        result = answer_question(args.question, router, vectorstore, answer_llm)
+        print(result.answer)
+        if result.cache_hit:
+            print("\n(semantic cache hit)")
+        else:
+            scores = {"confidence": result.router_confidence, "closest chunk": result.probe_similarity,
+                      "answer-context similarity": result.groundedness_score}
+            shown = "".join(f", {name} {value:.2f}" for name, value in scores.items() if value is not None)
+            print(f"\n(source {result.source}, reason {result.route_reason}{shown})")
             
     elif args.command == "evaluate":
         from src.evaluation.evaluator import run_evaluation

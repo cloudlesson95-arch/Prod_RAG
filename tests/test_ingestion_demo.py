@@ -74,7 +74,7 @@ def test_demo_documents_never_reach_the_persistent_index(embeddings, tmp_path):
 
 
 def test_answer_uses_only_the_uploaded_document(embeddings, monkeypatch):
-    """Verify the answer prompt is built from the document's chunks and gets a groundedness score."""
+    """Verify the answer prompt is built from the document's chunks, which come back scored as its passages."""
     monkeypatch.setattr(rag_agent, "ENABLE_RERANKER", False)  # keeps the cross-encoder model out of unit tests
     prompts = []
 
@@ -88,4 +88,5 @@ def test_answer_uses_only_the_uploaded_document(embeddings, monkeypatch):
 
     assert result["answer"] == "They live on Rottnest Island."
     assert "Rottnest Island" in prompts[0]
-    assert isinstance(result["groundedness_score"], float)
+    assert {p["source"] for p in result["passages"]} == {"quokkas.txt"}
+    assert result["groundedness_score"] == max(p["similarity"] for p in result["passages"])

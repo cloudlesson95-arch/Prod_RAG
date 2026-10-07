@@ -107,7 +107,7 @@ def multi_hop_search(question: str, initial_source: str = "none") -> Dict[str, A
     vs = get_vectorstore()
     llm = get_answer_llm()
     
-    answer = execute_multi_hop_pipeline(
+    answer, _ = execute_multi_hop_pipeline(
         question=question,
         initial_source=initial_source,
         vectorstore=vs,

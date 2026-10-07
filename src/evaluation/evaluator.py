@@ -67,7 +67,7 @@ def run_evaluation():
         logger.info(f"\n[{i+1}/{len(questions)}] Testing: '{q['query']}'")
 
         try:
-            answer = answer_question(q['query'], router, vectorstore, answer_llm)
+            answer = answer_question(q['query'], router, vectorstore, answer_llm).answer
             logger.info(f"\tThe user asked: {q['query']}")
             logger.info(f"\tLLM answer: {answer}")            
 

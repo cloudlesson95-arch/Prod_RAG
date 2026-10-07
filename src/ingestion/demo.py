@@ -2,14 +2,13 @@ import secrets
 import threading
 import time
 from collections import OrderedDict
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 
 from langchain_chroma import Chroma
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from src.config import CHUNK_SIZE, CHUNK_OVERLAP, DEMO_TTL_SECONDS, DEMO_MAX_DOCS
-from src.core.rag_agent import retrieve_chunks
-from src.monitoring.groundedness import score_groundedness
+from src.core.rag_agent import Passage, retrieve_chunks, score_passages
 from src.logging_config import setup_logging
 
 logger = setup_logging(__name__)
@@ -105,14 +104,14 @@ def answer_from_document(doc: DemoDocument, question: str, answer_llm) -> dict:
     No routing, multi-hop or semantic cache: the user already chose the document.
 
     Returns:
-        dict: {"answer": str, "groundedness_score": float | None}
+        dict: {"answer": str, "groundedness_score": float | None, "passages": list[dict]}
     """
     results = retrieve_chunks(question, "none", doc.vectorstore)
     context_text = "\n---\n".join(d.page_content for d in results)
     answer = answer_llm.invoke(DEMO_ANSWER_PROMPT.format(context=context_text, question=question)).content
 
+    passages = [Passage(d.metadata.get("source", doc.filename), d.page_content) for d in results]
     groundedness = None
-    if context_text and "I don't know" not in answer:
-        embeddings = doc.vectorstore.embeddings
-        groundedness = score_groundedness(embeddings.embed_query(answer), embeddings.embed_query(context_text))
-    return {"answer": answer, "groundedness_score": groundedness}
+    if passages and "I don't know" not in answer:
+        groundedness = score_passages(passages, answer, doc.vectorstore.embeddings)
+    return {"answer": answer, "groundedness_score": groundedness, "passages": [asdict(p) for p in passages]}

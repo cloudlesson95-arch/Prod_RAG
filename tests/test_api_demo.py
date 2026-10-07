@@ -34,7 +34,7 @@ def test_upload_then_query_round_trip(client):
     answer = client.post(f"/demo/documents/{body['doc_id']}/query", json={"question": "Where do quokkas live?"})
     assert answer.status_code == 200
     assert answer.json() == {"question": "Where do quokkas live?", "answer": "from notes.txt",
-                             "groundedness_score": 0.8}
+                             "groundedness_score": 0.8, "passages": []}
 
 
 def test_upload_rejects_unsupported_type(client):
