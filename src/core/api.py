@@ -1,9 +1,10 @@
 import math
 from dataclasses import asdict
 import os
+import time
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
-from fastapi import BackgroundTasks, FastAPI, File, Header, HTTPException, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, Header, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -11,14 +12,19 @@ from src.logging_config import setup_logging
 from src.config import (
     MAIN_LLM_MODEL, DEMO_MAX_FILE_BYTES, DEMO_MAX_TEXT_CHARS, DEMO_TTL_SECONDS, DEMO_RATE_LIMIT_PER_MINUTE,
     CORS_ALLOW_ORIGINS, APP_REVISION, LIVE_EVAL_CLIENT,
+    STATS_CACHE_SECONDS, STATS_MAX_ROUTING_EVENTS, STATS_EVAL_HISTORY_DAYS,
 )
 from src.core.utils import create_llm
 from src.core.vectorstore import create_or_get_vectorstore
 from src.core.rag_agent import AnswerResult, Passage, setup_router, answer_question
 from src.core.mcp_server import mcp
 from src.monitoring.telemetry import configure_telemetry
+from src.monitoring.stats import corpus_stats, routing_stats
+from src.routing.classifier import training_source_mix
 from src.storage.state_sync import initialize_state, read_local_version, read_only_reason
 from src.storage.event_store import get_event_store
+from src.storage.doc_registry import get_registered_documents
+from src.storage.question_store import get_current_questions
 from src.core.rate_limit import RateLimiter
 from src.ingestion.demo import DemoStore, answer_from_document
 from src.ingestion.errors import IngestError
@@ -189,6 +195,41 @@ def query_demo_document(doc_id: str, request: DemoQueryRequest):
         logger.error(f"Error answering demo query: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error processing query")
     return DemoQueryResponse(question=request.question, **result)
+
+
+_stats_cache: dict[tuple, tuple[float, dict]] = {}
+
+def stats_response(key: tuple, compute) -> dict:
+    """A /stats answer, computed at most once per STATS_CACHE_SECONDS: stats change slowly, and computing them lists
+    and reads storage. A failure answers 503, which (unlike an unhandled 500) still carries the CORS headers."""
+    cached = _stats_cache.get(key)
+    if cached and time.monotonic() - cached[0] < STATS_CACHE_SECONDS:
+        return cached[1]
+    try:
+        value = compute()
+    except Exception as e:
+        logger.error(f"[Stats] {key[0]} failed: {e}", exc_info=True)
+        raise HTTPException(status_code=503, detail="Stats are unavailable right now; try again shortly")
+    _stats_cache[key] = (time.monotonic(), value)
+    return value
+
+@app.get("/stats/eval-history")
+def stats_eval_history(limit: int = Query(30, ge=1, le=200)):
+    """Live and synthetic eval runs stored by live-eval (the CI gates and collect-data), newest first, with results."""
+    return stats_response(("eval-history", limit), lambda: {
+        "runs": event_store.list_recent("eval_run", days=STATS_EVAL_HISTORY_DAYS, limit=limit)})
+
+@app.get("/stats/corpus")
+def stats_corpus():
+    """The indexed documents of the snapshot this instance serves."""
+    return stats_response(("corpus",), lambda: corpus_stats(
+        get_registered_documents(), get_current_questions(), read_local_version()))
+
+@app.get("/stats/routing")
+def stats_routing(days: int = Query(7, ge=1, le=30)):
+    """How users' questions were routed in the last `days` UTC days, and PSI against the training-question mix."""
+    return stats_response(("routing", days), lambda: routing_stats(
+        event_store.list_recent("routing", days=days, limit=STATS_MAX_ROUTING_EVENTS), training_source_mix(), days))
 
 
 # MCP over HTTP at /mcp (the SDK's own route inside this sub-app). Mounted at the root, which matches

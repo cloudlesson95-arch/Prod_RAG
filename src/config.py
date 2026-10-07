@@ -126,3 +126,9 @@ DEMO_MAX_TEXT_CHARS = 200_000
 DEMO_TTL_SECONDS = 30 * 60  # idle time before a demo document is dropped
 DEMO_MAX_DOCS = 20
 DEMO_RATE_LIMIT_PER_MINUTE = 5
+
+# Dashboard (/stats/*): each answer is reused this long, since computing it lists and reads the event store.
+# Routing stats read at most the newest STATS_MAX_ROUTING_EVENTS events; eval history looks back this many days.
+STATS_CACHE_SECONDS = 60
+STATS_MAX_ROUTING_EVENTS = 2000
+STATS_EVAL_HISTORY_DAYS = 90

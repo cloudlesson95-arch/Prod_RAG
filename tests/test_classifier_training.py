@@ -21,6 +21,17 @@ def test_training_data_adds_current_questions_and_both_negative_sets(monkeypatch
     assert set(negatives) == {text for text, _ in classifier.NON_RETRIEVAL_DATA + classifier.GENERAL_KNOWLEDGE_DATA}
 
 
+def test_training_source_mix_counts_the_training_questions_per_source(monkeypatch):
+    """Verify the drift baseline counts the same questions training uses: no 'general' one, negatives as 'none'."""
+    monkeypatch.setattr(classifier, "load_questions", lambda path: [{"source_doc": "cat-facts.txt"},
+                                                                    {"source_doc": "general"}])
+    monkeypatch.setattr(classifier, "get_current_questions", lambda: [{"source": "ingested/batch/quokkas.md"}] * 2)
+
+    assert classifier.training_source_mix() == {
+        "cat-facts.txt": 1, "ingested/batch/quokkas.md": 2,
+        "none": len(classifier.NON_RETRIEVAL_DATA) + len(classifier.GENERAL_KNOWLEDGE_DATA)}
+
+
 def test_train_classifier_balances_classes_and_saves_the_model(tmp_path, monkeypatch):
     """Verify an 8-to-2 imbalance is trained with balanced class weights and the model lands where routing loads it."""
     vectors = {"corpus question": [1.0, 0.0], "small talk": [0.0, 1.0]}

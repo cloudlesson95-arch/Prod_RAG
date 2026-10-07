@@ -77,6 +77,15 @@ def load_training_data():
     logger.info(f"Loaded {len(negatives)} chit-chat and general-knowledge questions (label=0)")
     return benchmark + generated + negatives
 
+
+def training_source_mix() -> dict[str, int]:
+    """Training questions per source, with "none" for the ones that need no retrieval: the routing mix the classifier
+    was built for, which the dashboard's drift check compares real traffic with. Same questions as load_training_data."""
+    mix = Counter(q["source_doc"] for q in load_questions(EVAL_QUESTIONS_PATH) if q.get("source_doc") != "general")
+    mix.update(q["source"] for q in get_current_questions())
+    mix["none"] += len(NON_RETRIEVAL_DATA) + len(GENERAL_KNOWLEDGE_DATA)
+    return dict(mix)
+
 def train_classifier():
     """Train a Logistic Regression classifier on query embeddings to predict retrieval necessity."""
     training_data = load_training_data()

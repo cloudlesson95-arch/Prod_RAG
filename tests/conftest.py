@@ -55,6 +55,11 @@ class FakeEventStore:
             raise ConnectionError("event store unreachable")
         self.records.append((kind, record))
 
+    def list_recent(self, kind, days, limit=1000, now=None):
+        if self.fail:
+            raise ConnectionError("event store unreachable")
+        return [record for k, record in reversed(self.records) if k == kind][:limit]
+
 
 @pytest.fixture
 def fake_event_store():
