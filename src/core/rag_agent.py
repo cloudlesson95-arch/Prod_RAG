@@ -223,7 +223,9 @@ def answer_question(question: str, router, vectorstore, answer_llm, max_retries:
             logger.info(f"[Groundedness]: Score: {g_score:.3f}")
 
     if ENABLE_SEMANTIC_CACHE:
-        if "I don't know" in answer:
+        if not answer.strip():
+            logger.warning("[Semantic Cache]: Skipping caching for an empty answer.")
+        elif "I don't know" in answer:
              logger.info("[Semantic Cache]: Skipping caching for 'I don't know' answer.")
         else:
             add_to_cache(question, query_vec, answer)

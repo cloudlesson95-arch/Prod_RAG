@@ -89,8 +89,9 @@ SECRET_BACKEND = os.getenv("SECRET_BACKEND", "keyring")  # "keyring", "env", "az
 KEYRING_SERVICE_NAME = os.getenv("KEYRING_SERVICE_NAME", "agentic-rag-platform")
 AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
 
-# Groundedness Check threshold
-GROUNDEDNESS_THRESHOLD = float(os.getenv("GROUNDEDNESS_THRESHOLD", "0.5"))
+# Answer-context similarity below this logs a warning. A topic check, not a fact check. Measured on the benchmark
+# (max over chunks): on-topic answers 0.35-0.79, bare numbers 0.18-0.28, other questions' answers 0.1-0.2 on average.
+GROUNDEDNESS_THRESHOLD = float(os.getenv("GROUNDEDNESS_THRESHOLD", "0.3"))
 
 # Azure Application Insights Telemetry
 APPLICATIONINSIGHTS_CONNECTION_STRING = os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING", "")

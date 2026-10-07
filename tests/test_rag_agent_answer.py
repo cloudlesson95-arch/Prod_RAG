@@ -83,3 +83,17 @@ def test_llm_routing_reports_its_source_without_classifier_scores(vectorstore, m
 
     assert (result.source, result.route_reason) == ("cat-facts.txt", "llm")
     assert result.router_confidence is None and result.probe_similarity is None
+
+
+@pytest.mark.parametrize("reply, cached", [("A clowder.", ["A clowder."]), ("", []), ("  \n", [])])
+def test_only_non_empty_answers_are_cached(vectorstore, monkeypatch, reply, cached):
+    """Verify a real answer is cached, while an empty LLM reply is returned without being cached."""
+    monkeypatch.setattr(rag_agent, "ENABLE_SEMANTIC_CACHE", True)
+    monkeypatch.setattr(rag_agent, "check_cache", lambda vec: (False, None, 0.0))
+    stored = []
+    monkeypatch.setattr(rag_agent, "add_to_cache", lambda question, vec, answer: stored.append(answer))
+
+    result = rag_agent.answer_question(QUESTION, None, vectorstore, FakeLLM(reply), max_retries=0)
+
+    assert result.answer == reply
+    assert stored == cached
