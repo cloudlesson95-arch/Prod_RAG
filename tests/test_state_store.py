@@ -1,11 +1,8 @@
 import os
-import uuid
-import boto3
 from botocore.exceptions import ClientError
 
 import pytest
 from azure.core.exceptions import ResourceNotFoundError
-from azure.storage.blob import BlobServiceClient
 
 from src.storage import state_store
 from src.storage.state_store import get_state_store, SnapshotConflict, AzureBlobStateStore, S3StateStore
@@ -68,16 +65,6 @@ def test_azure_backend_requires_url_or_connection_string(monkeypatch):
         get_state_store("azure_blob")
 
 
-@pytest.fixture
-def azurite_container():
-    """Create a throwaway container in Azurite and delete it after the test."""
-    service = BlobServiceClient.from_connection_string(AZURITE_CONNECTION_STRING)
-    name = f"test-{uuid.uuid4().hex[:12]}"
-    service.create_container(name)
-    yield name
-    service.delete_container(name)
-
-
 @needs_azurite
 def test_azure_blob_store_contract(azurite_container, tmp_path):
     """Verify the Azure backend honors the same contract as the fake."""
@@ -100,19 +87,6 @@ def test_s3_backend_requires_bucket(monkeypatch):
     monkeypatch.setattr(state_store, "S3_STATE_BUCKET", "")
     with pytest.raises(ValueError):
         get_state_store("s3")
-
-
-@pytest.fixture
-def moto_bucket(monkeypatch):
-    """A bucket in moto's in-memory S3, with fake credentials so real AWS is never touched."""
-    moto = pytest.importorskip("moto")
-    monkeypatch.delenv("AWS_PROFILE", raising=False)
-    for name in ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN"):
-        monkeypatch.setenv(name, "testing")
-    monkeypatch.setenv("AWS_DEFAULT_REGION", "us-east-1")
-    with moto.mock_aws():
-        boto3.client("s3", region_name="us-east-1").create_bucket(Bucket="test-state")
-        yield "test-state"
 
 
 def test_s3_store_contract(moto_bucket, tmp_path):

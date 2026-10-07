@@ -62,6 +62,19 @@ class StateStore(abc.ABC):
         pass
 
 
+def blob_service_client(account_url: str = "", connection_string: str = "", **client_options) -> BlobServiceClient:
+    """Client for the state storage account, shared by the snapshot and event stores.
+
+    Raises ValueError when neither an account URL nor a connection string (Azurite only) is configured.
+    """
+    if connection_string:
+        return BlobServiceClient.from_connection_string(connection_string, **client_options)
+    if account_url:
+        return BlobServiceClient(account_url=account_url, credential=DefaultAzureCredential(), **client_options)
+    raise ValueError("STATE_BACKEND=azure_blob needs AZURE_STORAGE_ACCOUNT_URL "
+                     "(or AZURE_STORAGE_CONNECTION_STRING for Azurite).")
+
+
 class AzureBlobStateStore(StateStore):
     """Snapshot stored as one Azure blob; versions are the blob's ETag.
 
@@ -70,13 +83,7 @@ class AzureBlobStateStore(StateStore):
     """
 
     def __init__(self, container: str, blob_name: str, account_url: str = "", connection_string: str = ""):
-        if connection_string:
-            service = BlobServiceClient.from_connection_string(connection_string)
-        elif account_url:
-            service = BlobServiceClient(account_url=account_url, credential=DefaultAzureCredential())
-        else:
-            raise ValueError("STATE_BACKEND=azure_blob needs AZURE_STORAGE_ACCOUNT_URL "
-                             "(or AZURE_STORAGE_CONNECTION_STRING for Azurite).")
+        service = blob_service_client(account_url, connection_string)
         self._blob = service.get_blob_client(container=container, blob=blob_name)
 
     def download(self, dest_path: str) -> str | None:
