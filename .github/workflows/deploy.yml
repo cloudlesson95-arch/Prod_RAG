@@ -66,6 +66,11 @@ jobs:
 
       - name: Configure Registry & Update Container App
         run: |
+          CORS="${{ vars.CORS_ALLOW_ORIGINS }}"
+          if [ -z "$CORS" ] || [[ "$CORS" == *,* ]]; then
+            echo "::error::GitHub variable CORS_ALLOW_ORIGINS must list the web frontend's origins separated by spaces (e.g. https://<project>.vercel.app http://localhost:3000)"
+            exit 1
+          fi
           IDENTITY_ID=$(az identity list --resource-group ${{ vars.RESOURCE_GROUP }} --query "[0].id" -o tsv)
           CLIENT_ID=$(az identity list --resource-group ${{ vars.RESOURCE_GROUP }} --query "[0].clientId" -o tsv)
           
@@ -79,7 +84,8 @@ jobs:
             --name ${{ vars.CONTAINER_APP_NAME }} \
             --resource-group ${{ vars.RESOURCE_GROUP }} \
             --image "${{ vars.ACR_NAME }}.azurecr.io/rag-api:${{ github.sha }}" \
-            --set-env-vars "AZURE_CLIENT_ID=$CLIENT_ID" "SECRET_BACKEND=azure_keyvault" "MCP_DNS_REBINDING_PROTECTION=false"
+            --set-env-vars "AZURE_CLIENT_ID=$CLIENT_ID" "SECRET_BACKEND=azure_keyvault" "MCP_DNS_REBINDING_PROTECTION=false" \
+              "CORS_ALLOW_ORIGINS=$CORS" "APP_REVISION=${{ github.sha }}"
 
   post-deploy-azure-gate:
     name: Live Evaluation Gate (Azure)
@@ -97,10 +103,27 @@ jobs:
       - name: Install dependencies
         run: pip install --extra-index-url https://download.pytorch.org/whl/cpu -r requirements.txt
 
+      - name: Log in to Azure (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # live-eval stores its run as an eval_run event in the state store, where the dashboard reads it
+      - name: Point live-eval at the state store
+        run: |
+          # Lookup first, as a command of its own, so a failed az call fails the step
+          ACCOUNT_URL=$(az storage account list -g ${{ vars.RESOURCE_GROUP }} --query '[0].primaryEndpoints.blob' -o tsv)
+          {
+            echo "STATE_BACKEND=azure_blob"
+            echo "AZURE_STORAGE_ACCOUNT_URL=$ACCOUNT_URL"
+          } >> "$GITHUB_ENV"
+
       - name: Wait for Azure Container App Warmup
         run: |
           echo "Polling ${{ vars.DEPLOYED_APP_URL }}/health..."
-          for i in {1..30}; do
+          for _ in {1..30}; do
             HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${{ vars.DEPLOYED_APP_URL }}/health" || true)
             if [ "$HTTP_STATUS" -eq 200 ]; then
               echo "Azure Container App is ready!"
@@ -150,13 +173,18 @@ jobs:
       - name: Deploy / Update AWS Lambda Container
         env:
           # One definition for both the update and the create branch below
-          LAMBDA_ENV: "Variables={SECRET_BACKEND=aws_secretsmanager,LOG_TO_FILE=false,LOG_TO_CONSOLE=true,HOME=/tmp,HF_HUB_OFFLINE=1,TRANSFORMERS_OFFLINE=1,AWS_LWA_ASYNC_INIT=true,MCP_DNS_REBINDING_PROTECTION=false,STATE_BACKEND=s3,S3_STATE_BUCKET=${{ vars.AWS_STATE_BUCKET }},LOCAL_DIR=/tmp/state/.local,DATA_DIR=/tmp/state/data}"
+          LAMBDA_ENV: "Variables={SECRET_BACKEND=aws_secretsmanager,LOG_TO_FILE=false,LOG_TO_CONSOLE=true,HOME=/tmp,HF_HUB_OFFLINE=1,TRANSFORMERS_OFFLINE=1,AWS_LWA_ASYNC_INIT=true,MCP_DNS_REBINDING_PROTECTION=false,STATE_BACKEND=s3,S3_STATE_BUCKET=${{ vars.AWS_STATE_BUCKET }},LOCAL_DIR=/tmp/state/.local,DATA_DIR=/tmp/state/data,CORS_ALLOW_ORIGINS=${{ vars.CORS_ALLOW_ORIGINS }},APP_REVISION=${{ github.sha }}}"
         run: |
           FUNCTION_NAME="ragprod-api"
           IMAGE_URI="${{ vars.AWS_ECR_REPO }}:${{ github.sha }}"
 
           if [ -z "${{ vars.AWS_STATE_BUCKET }}" ]; then
             echo "::error::GitHub variable AWS_STATE_BUCKET is not set (infra/aws/setup.ps1 prints it)"
+            exit 1
+          fi
+          CORS="${{ vars.CORS_ALLOW_ORIGINS }}"
+          if [ -z "$CORS" ] || [[ "$CORS" == *,* ]]; then
+            echo "::error::GitHub variable CORS_ALLOW_ORIGINS must list the web frontend's origins separated by spaces (e.g. https://<project>.vercel.app http://localhost:3000)"
             exit 1
           fi
 
@@ -248,12 +276,12 @@ jobs:
           FUNCTION_NAME="ragprod-api"
           URL_CONFIG=$(aws lambda get-function-url-config --function-name $FUNCTION_NAME --region ${{ vars.AWS_REGION }} --query "FunctionUrl" --output text)
           CLEAN_URL=$(echo "$URL_CONFIG" | sed 's/\/$//')
-          echo "DEPLOYED_AWS_URL=$CLEAN_URL" >> $GITHUB_ENV
+          echo "DEPLOYED_AWS_URL=$CLEAN_URL" >> "$GITHUB_ENV"
 
       - name: Wait for AWS Lambda Warmup
         run: |
           echo "Polling $DEPLOYED_AWS_URL/health..."
-          for i in {1..30}; do
+          for _ in {1..30}; do
             HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$DEPLOYED_AWS_URL/health" || true)
             if [ "$HTTP_STATUS" -eq 200 ]; then
               echo "AWS Lambda API is ready!"
@@ -268,7 +296,9 @@ jobs:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
           SECRET_BACKEND: env
+          STATE_BACKEND: s3  # live-eval stores its run as an eval_run event in the state bucket, for the dashboard
+          S3_STATE_BUCKET: ${{ vars.AWS_STATE_BUCKET }}
         run: |
           python -m src.app live-eval \
-            --target-url $DEPLOYED_AWS_URL \
+            --target-url "$DEPLOYED_AWS_URL" \
             --revision ${{ github.sha }}

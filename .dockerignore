@@ -9,3 +9,4 @@ logs/
 .plan.md
 data/ingested/
 inbox/
+web/
