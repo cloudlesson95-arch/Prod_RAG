@@ -19,6 +19,31 @@
   }
 }
 
+/* Dashboard charts (components/dashboard): roles from the data-viz reference palette, a validated step per mode.
+   Series 1 and 2 pass the palette validator on both of this app's surfaces (#ffffff and #0a0a0a). */
+:root {
+  --viz-series-1: #2a78d6;   /* live eval runs; users' questions */
+  --viz-series-2: #eb6834;   /* synthetic eval runs */
+  --viz-context: #c3c2b7;    /* de-emphasized comparison: the training mix */
+  --viz-grid: #e1e0d9;
+  --viz-axis: #c3c2b7;
+  --viz-muted: #898781;      /* tick labels and the gate line */
+  --viz-good: #0ca30c;       /* status colors: always with an icon and a label */
+  --viz-warning: #fab219;
+  --viz-serious: #ec835a;
+  --viz-critical: #d03b3b;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --viz-series-1: #3987e5;
+    --viz-series-2: #d95926;
+    --viz-context: #52514e;
+    --viz-grid: #2c2c2a;
+    --viz-axis: #383835;
+  }
+}
+
 body {
   background: var(--background);
   color: var(--foreground);
