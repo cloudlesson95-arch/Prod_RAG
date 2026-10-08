@@ -60,6 +60,13 @@ async function request<T>(baseUrl: string, path: string, init: RequestInit = {})
   return (await response.json()) as T;
 }
 
+/** Run a request and measure how long it took, for the "x.x s" shown next to answers. */
+export async function timed<T>(call: () => Promise<T>): Promise<{ result: T; seconds: number }> {
+  const started = performance.now();
+  const result = await call();
+  return { result, seconds: (performance.now() - started) / 1000 };
+}
+
 function postJson(body: unknown): RequestInit {
   return { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
 }
