@@ -3,13 +3,14 @@
 [![Eval Loop](https://github.com/cloudlesson95-arch/Prod_RAG/actions/workflows/evaluate.yml/badge.svg)](https://github.com/cloudlesson95-arch/Prod_RAG/actions/workflows/evaluate.yml)
 [![Deploy](https://github.com/cloudlesson95-arch/Prod_RAG/actions/workflows/deploy.yml/badge.svg)](https://github.com/cloudlesson95-arch/Prod_RAG/actions/workflows/deploy.yml)
 
-A production-oriented continuation of [Simple_RAG](https://github.com/cloudlesson95-arch/Simple_RAG). The core pipeline (hybrid search, cross-encoder re-ranking, multi-hop agent, classical ML routing, semantic cache, LLM-as-judge evaluation) is documented in the [Simple_RAG README](https://github.com/cloudlesson95-arch/Simple_RAG#readme). This repository adds an MCP server, pluggable secrets, monitoring, persistent state, and automated deployment of one Docker image to **Azure Container Apps** and **AWS Lambda**.
+A production-oriented continuation of [Simple_RAG](https://github.com/cloudlesson95-arch/Simple_RAG). The core pipeline (hybrid search, cross-encoder re-ranking, multi-hop agent, classical ML routing, semantic cache, LLM-as-judge evaluation) is documented in the [Simple_RAG README](https://github.com/cloudlesson95-arch/Simple_RAG#readme). This repository adds an MCP server, pluggable secrets, monitoring, persistent state, a web frontend, and automated deployment of one Docker image to **Azure Container Apps** and **AWS Lambda**.
 
-> 🚧 Work in progress: Phases 1–7 are done, Phase 8 is planned.
 
 ## Architecture
 
 ```
+Browser ── Vercel: web/ (Next.js chat, demo sandbox, dashboard) ──► either cloud's API (CORS)
+
 GitHub Actions (OIDC, no stored cloud credentials)
   ├── evaluate.yml      build image → offline evaluation gate
   ├── collect-data.yml  daily: release notes → ingest-batch per cloud → restart → live evaluation gate
@@ -21,10 +22,11 @@ GitHub Actions (OIDC, no stored cloud credentials)
             ├── secrets: Key Vault                 ├── secrets: Secrets Manager
             │            (Managed Identity)        │            (IAM execution role)
             ├── state:   Blob snapshot (versioned) ├── state:   S3 snapshot (versioned)
+            │            + events/ (routing, evals)│            + events/ (routing, evals)
             ├── logs:    Application Insights      ├── logs:    CloudWatch
             └── scales to zero, 1 replica          └── scales to zero, Function URL
 
-Same image in both clouds: FastAPI (/health, /query, /demo/documents, /docs) + MCP server (/mcp)
+Same image in both clouds: FastAPI (/health, /query, /demo/documents, /stats/*, /docs) + MCP server (/mcp)
 ```
 
 ## Features by phase
@@ -38,7 +40,7 @@ Same image in both clouds: FastAPI (/health, /query, /demo/documents, /docs) + M
 | 5. Persistent storage | ✅ Done | Corpus, index, document registry and router models live in a versioned snapshot (Azure Blob / S3), restored at startup and published after every write |
 | 6. Ingestion | ✅ Done | Public demo sandbox: upload a .txt, .md or .pdf and ask questions about that one document. Admin `ingest-batch`: index an inbox folder into the shared corpus as one snapshot. A corpus probe makes new documents reachable through the classical router |
 | 7. Scheduled data pipeline | ✅ Done | Daily `collect-data` workflow: the latest Pydantic AI release notes go through `ingest-batch` in both clouds, followed by a restart and the evaluation gates. Every batch has the LLM write questions per document; the retrieval classifier trains on them, and a routing guard refuses batches that would misroute benchmark questions |
-| 8. Web frontend | Planned | Next.js chat, demo sandbox and dashboard pages |
+| 8. Web frontend | ✅ Done | Next.js app on Vercel with an Azure/AWS switcher: a chat that shows each answer's route, scores and source passages; the demo sandbox, which uploads the document again by itself when an instance has dropped it; and a dashboard of eval runs, routing drift (PSI) and the corpus. The API now reports how each answer was produced, and stores routing decisions and eval runs as events next to the snapshot |
 
 **Design notes**
 
@@ -48,6 +50,8 @@ Same image in both clouds: FastAPI (/health, /query, /demo/documents, /docs) + M
 - **Two ingestion lanes.** Public requests never write shared state. The demo sandbox keeps each upload in its own in-memory collection (30 idle minutes, 20 documents and 5 uploads per minute per instance) and answers only from that document. Shared documents go through `ingest-batch`, which only identities with write access to the state store can run (you, and the daily `collect-data` workflow): it starts from the latest snapshot, checks every file before writing anything, embeds only new or changed files and publishes one snapshot per batch.
 - **Routing.** One function, `decide_route()` in `src/routing/router.py`, decides for `/query`, the MCP `route_query` tool and the checks below. The retrieval classifier is trained on the benchmark questions plus questions the LLM wrote for every indexed document, against chit-chat and general-knowledge questions, so it changes with the corpus. An exact corpus probe finds the closest chunk: at a cosine similarity of `CORPUS_PROBE_THRESHOLD` (0.55, measured) or more it overrules the classifier's "no retrieval", and that chunk's source is the one searched. An unsure "retrieve" vote (confidence below `CORPUS_PROBE_FLOOR_MAX_CONFIDENCE`, 0.65) only stands if that chunk reaches `CORPUS_PROBE_FLOOR` (0.45); otherwise no document covers the question, and the LLM answers it directly. A question that names an indexed release (`v2.51.0`) goes to that release's notes and retrieves only its chunks, because embeddings don't tell version numbers apart.
 - **Publish guard.** After retraining, `ingest-batch` checks that every benchmark question still routes to its own source (and the general one to no retrieval). If not, nothing is published, and the CLI names the questions the new document would capture.
+- **Events next to the snapshot.** Per-request data can't go into the snapshot, which only a batch publishes. So after each `/query` response the API writes one small JSON object under `events/` in the state container or bucket: the route, the scores, a cache hit, whether `live-eval` sent the request, and the deployed revision, but never the question text. `live-eval` writes one object per run, answers included, to the state store it's configured for (in CI, the target cloud's). `/stats/*` reads them for the dashboard, cached for 60 s. The drift score (PSI) compares users' routing with the classifier's training mix.
+- **A separate frontend.** `web/` is a Next.js app whose pages run in the browser and call either cloud's API directly. `CORS_ALLOW_ORIGINS` lists the allowed origins. The backend URLs are compiled in at build time (`NEXT_PUBLIC_*`). It deploys on its own (Vercel), so a frontend change never rebuilds the backend image.
 
 ## Local setup
 
@@ -65,6 +69,19 @@ python -m src.app serve                          # http://localhost:8000/docs
 Other commands: `query "<question>"`, `evaluate`, `history`, `live-eval --target-url <url> [--questions <file> --report-only]`, `ingest-batch [--dir inbox] [--skip-questions]`, `collect-releases [--repo owner/name]`, `questions export --out <file>`, `routing-report`, `state status`, `state pull`, `get-secret <name>`.
 
 To change dependencies, edit `requirements.in` (or `requirements-dev.in`), recompile with the command in its header, then run the `uv pip sync` line again. Recompiling keeps the existing pins unless you pass `--upgrade-package <name>`.
+
+### Web frontend
+
+Needs Node.js 24. With the API running (`python -m src.app serve`):
+
+```powershell
+cd web
+npm ci
+Copy-Item .env.example .env.local    # points the Azure button at localhost:8000; set NEXT_PUBLIC_AWS_API_URL too for a second button
+npm run dev                          # http://localhost:3000
+```
+
+Checks: `npm run lint`, `npm test` (Vitest) and `npm run build`. The API accepts `http://localhost:3000` by default (`CORS_ALLOW_ORIGINS`).
 
 ### Test
 
@@ -91,6 +108,7 @@ Every setting has a working local default, and the cloud values are set by `infr
 | `STATE_BACKEND` | `local` | `local`, `azure_blob` (with `AZURE_STORAGE_ACCOUNT_URL`) or `s3` (with `S3_STATE_BUCKET`) |
 | `LOCAL_DIR`, `DATA_DIR` | `<repo>/.local`, `<repo>/data` | Working copy of the index and databases, and of the corpus |
 | `MCP_DNS_REBINDING_PROTECTION` | `true` | Set to `false` when `/mcp` is served behind a public hostname |
+| `CORS_ALLOW_ORIGINS` | `http://localhost:3000` | Browser origins allowed to call the API, separated by spaces (no commas); `deploy.yml` sets it from the GitHub variable |
 | `CORPUS_PROBE_THRESHOLD` | `0.55` | Closest-chunk similarity at which a question is retrieved although the classifier says no; re-measure with `routing-report` after large batches |
 | `CORPUS_PROBE_FLOOR`, `CORPUS_PROBE_FLOOR_MAX_CONFIDENCE` | `0.45`, `0.65` | A retrieval vote with confidence below the second value needs a chunk at least this similar, so questions no document covers go straight to the LLM |
 | `QUESTION_GEN_PAUSE_SECONDS` | `0` | Pause between the LLM calls that write questions during `ingest-batch`; raise it if the LLM's rate limit bites |
@@ -109,10 +127,20 @@ Prerequisites: PowerShell, the Azure CLI signed in (`az login`) with permission 
    | `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` | `RESOURCE_GROUP`, `ACR_NAME`, `CONTAINER_APP_NAME`, `DEPLOYED_APP_URL` |
    | `AWS_ROLE_TO_ASSUME` | `AWS_REGION`, `AWS_ECR_REPO`, `AWS_LAMBDA_ROLE_ARN`, `AWS_STATE_BUCKET` |
    | `GROQ_API_KEY`, `GOOGLE_API_KEY` (used by the evaluation gates and the question generator) | `COLLECT_REPO` (optional, default `pydantic/pydantic-ai`) |
+   | | `CORS_ALLOW_ORIGINS`: the frontend's origins separated by spaces, e.g. `https://<project>.vercel.app http://localhost:3000` (use `http://localhost:3000` until the frontend has a domain) |
 
-3. Push to `main`, or run the Deploy workflow manually (targeting `azure`, `aws` or `both`). The first AWS run creates the Lambda function and its Function URL.
+3. Push to `main`, or run the Deploy workflow manually (targeting `azure`, `aws` or `both`). The first AWS run creates the Lambda function and its Function URL. The deploy stops before changing anything if `CORS_ALLOW_ORIGINS` is missing or contains a comma.
 
 Re-running the Azure `setup.ps1` later resets the Container App to a placeholder image until the next deploy, so run the Deploy workflow right after it.
+
+### Deploy the web frontend (Vercel)
+
+1. In Vercel, import the GitHub repository with **Root Directory** `web`; Vercel detects Next.js.
+2. Add the environment variables `NEXT_PUBLIC_AZURE_API_URL` (the `DEPLOYED_APP_URL`) and `NEXT_PUBLIC_AWS_API_URL` (the Lambda Function URL), then deploy. A cloud left empty is hidden from the switcher.
+3. Put the production domain from Settings → Domains into the GitHub variable `CORS_ALLOW_ORIGINS`, and run the Deploy workflow so both APIs accept requests from it.
+4. Optional: in Settings → Git, set the Ignored Build Step to `git diff --quiet HEAD^ HEAD -- .`, so commits that don't touch `web/` don't rebuild the frontend.
+
+The backend URLs are compiled into the frontend: after changing one, redeploy in Vercel.
 
 ### Check a deployment
 
@@ -125,9 +153,11 @@ Invoke-RestMethod -Method Post -Uri "$AWS_URL/query" -ContentType 'application/j
 $DOC = curl.exe -s -F "file=@notes.pdf" "$AZ_URL/demo/documents" | ConvertFrom-Json        # demo sandbox: doc_id, chunks, expires_in
 Invoke-RestMethod -Method Post -Uri "$AZ_URL/demo/documents/$($DOC.doc_id)/query" -ContentType 'application/json' -Body '{"question":"What is this document about?"}' -TimeoutSec 300
 python -m src.app live-eval --target-url $AZ_URL --revision manual     # benchmark against the deployment
+curl.exe "$AZ_URL/stats/eval-history"                                  # stored eval runs; also /stats/routing and /stats/corpus
+curl.exe -i -X OPTIONS "$AWS_URL/query" -H "Origin: https://<project>.vercel.app" -H "Access-Control-Request-Method: POST"   # CORS: 200 with access-control-allow-origin
 ```
 
-API docs are at `<url>/docs`, and MCP clients connect to `<url>/mcp`. Logs: `az containerapp logs show -n <app> -g rg-ragprod --follow` and `aws logs tail /aws/lambda/ragprod-api --follow --region us-east-1`.
+API docs are at `<url>/docs`, and MCP clients connect to `<url>/mcp`. The web frontend shows the same for either cloud: switch Azure/AWS in its header. Logs: `az containerapp logs show -n <app> -g rg-ragprod --follow` and `aws logs tail /aws/lambda/ragprod-api --follow --region us-east-1`.
 
 ### Add documents
 
@@ -175,17 +205,17 @@ The release notes are one source with a 10-release window: a new release replace
 
 ### Teardown
 
-Disable the Deploy workflow first (otherwise the next push re-creates the Lambda function), then run `.\infra\azure\teardown.ps1` and `.\infra\aws\teardown.ps1`. They list everything the setup scripts and deploys created, including all state snapshots, ask for confirmation, delete it, and are safe to re-run. Add `-DeleteOidcProvider` to the AWS script if no other repository in the account uses GitHub OIDC. To deploy again, repeat the steps above; only `AZURE_CLIENT_ID` and `DEPLOYED_APP_URL` change.
+Disable the Deploy workflow first (otherwise the next push re-creates the Lambda function), then run `.\infra\azure\teardown.ps1` and `.\infra\aws\teardown.ps1`. They list everything the setup scripts and deploys created, including all state snapshots, ask for confirmation, delete it, and are safe to re-run. Add `-DeleteOidcProvider` to the AWS script if no other repository in the account uses GitHub OIDC. To deploy again, repeat the steps above; only `AZURE_CLIENT_ID` and `DEPLOYED_APP_URL` change. If you created the Vercel project, delete it under its Settings → Advanced.
 
 ## Known limitations
 
-- The endpoints, including `/mcp` and the demo sandbox, are public and unauthenticated: anyone with the URL can read the corpus and use your LLM quota. Demo uploads are rate-limited per instance only.
+- The endpoints, including `/mcp`, the demo sandbox and the read-only `/stats/*`, are public and unauthenticated: anyone with the URL can read the corpus and use your LLM quota. Demo uploads are rate-limited per instance only.
 - Both clouds scale to zero, so the first request after an idle period can take a minute or more.
 - On Lambda, a warm instance can serve an older snapshot for a while after a write made elsewhere.
 - Editing the seed files in `data/` doesn't change an existing snapshot; add or update documents as described above.
 - After a manual `ingest-batch`, running instances serve the previous snapshot until they restart (the scheduled workflow restarts them itself).
 - Demo documents live in one instance's memory: a restart, scale-to-zero or 30 idle minutes removes them, and on Lambda a follow-up question can reach another instance and get a 404 (upload again). The 2 MB upload limit is checked after the request body has arrived; the platform caps the request itself (6 MB on Lambda).
-- The demo's `groundedness_score` is the similarity between the answer and the retrieved text: it flags answers that drift off topic, not wrong facts, and short correct answers score low.
+- The answer-context similarity shown with answers (`groundedness_score` in the API) is the best cosine similarity between the answer and one of its passages. It flags answers that drift off topic, not wrong facts, and short factual answers (a number, a name) score low even when correct.
 - Routing to new documents: in measurements, questions about a new document reached retrieval 11 of 11 times once it had generated questions, and 9 of 10 for a document without them; borderline wordings can still go to the LLM without retrieval. With `ROUTING_METHOD=llm`, ingested documents are unreachable (the LLM router's source list is fixed), and the multi-hop agent's second hop can only target the seed files.
 - Questions near the corpus's topics that no document covers (for example about an animal other than cats) are kept away from retrieval by the probe floor: 0 of 31 such test questions were retrieved, down from 17. The two floor values are tuned on small question sets, and a confident classifier vote (0.65 or more) is never floored, so such a question can still end in "I don't know".
 - Release notes: only releases inside the 10-release window are known, and a question that names no version ("Which release added GPT-Live?") can name the wrong release.
@@ -193,7 +223,10 @@ Disable the Deploy workflow first (otherwise the next push re-creates the Lambda
 - GitHub pauses scheduled workflows after 60 days without repository activity; re-enable Collect Data in the Actions tab.
 - On Groq's free tier (8,000 tokens per minute for `gpt-oss-20b`), bursts of expensive questions, such as a `live-eval` run, can hit the rate limit. The API then answers 500 instead of retrying.
 - The semantic cache is per instance and starts empty after every deploy (by design).
-- `live-eval` stores its results in the `rag.db` of the machine that runs it, not in the deployed state, so the scheduled workflow's live and synthetic scores appear only in its job logs.
+- `live-eval` stores each run in the event store next to the state store it's configured for (in CI, the target cloud's), so the dashboard shows it; runs from before Phase 8 weren't kept. A `live-eval` from your machine with the default `STATE_BACKEND=local` goes to your local store.
+- Routing and eval events are kept until deleted (no retention rule yet). On Lambda an event is written after the response, so an instance frozen right away can lose it; the dashboard's counts are a sample. Stats are cached 60 s per instance, and PSI is shown once there are 30 routed user questions in 7 days.
+- The frontend's backend URLs are fixed at build time (redeploy in Vercel to change them), and Vercel's preview deployments aren't in `CORS_ALLOW_ORIGINS`, so previews can't call the clouds.
+- The model can return an empty answer. It isn't cached, but the API still answers 200.
 - Every deploy pushes a multi-GB image to both registries; delete old tags periodically.
 
 ## License
