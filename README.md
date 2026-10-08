@@ -135,12 +135,14 @@ Re-running the Azure `setup.ps1` later resets the Container App to a placeholder
 
 ### Deploy the web frontend (Vercel)
 
-1. In Vercel, import the GitHub repository with **Root Directory** `web`; Vercel detects Next.js.
-2. Add the environment variables `NEXT_PUBLIC_AZURE_API_URL` (the `DEPLOYED_APP_URL`) and `NEXT_PUBLIC_AWS_API_URL` (the Lambda Function URL), then deploy. A cloud left empty is hidden from the switcher.
+Deploy the backend first: the frontend needs both API URLs, and the Lambda Function URL only exists after the first AWS deploy.
+
+1. Sign up at Vercel with **Continue with GitHub**. Choose **Add New… → Project**; if this repository isn't listed, grant Vercel's GitHub app access to it, then **Import** it.
+2. Set **Root Directory** to `web` (Vercel then detects Next.js), add the environment variables `NEXT_PUBLIC_AZURE_API_URL` (the `DEPLOYED_APP_URL`) and `NEXT_PUBLIC_AWS_API_URL` (the Lambda Function URL), and **Deploy**. A cloud left empty is hidden from the switcher.
 3. Put the production domain from Settings → Domains into the GitHub variable `CORS_ALLOW_ORIGINS`, and run the Deploy workflow so both APIs accept requests from it.
 4. Optional: in Settings → Git, set the Ignored Build Step to `git diff --quiet HEAD^ HEAD -- .`, so commits that don't touch `web/` don't rebuild the frontend.
 
-The backend URLs are compiled into the frontend: after changing one, redeploy in Vercel.
+Shortcut: Vercel names the domain after the project (`https://<project>.vercel.app`) when nobody else holds that name. Set `CORS_ALLOW_ORIGINS` to it before the backend deploy, then use that project name in step 1, and step 3 is only a check. The backend URLs are compiled into the frontend: after changing one, redeploy in Vercel.
 
 ### Check a deployment
 
