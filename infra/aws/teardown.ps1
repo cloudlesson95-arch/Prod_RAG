@@ -177,4 +177,4 @@ if ($DeleteOidcProvider) {
 Write-Host "`n=== AWS TEARDOWN COMPLETE ===" -ForegroundColor Green
 Write-Host "Optionally remove these from GitHub (Settings -> Secrets and variables -> Actions):" -ForegroundColor Yellow
 Write-Host "Secret:    AWS_ROLE_TO_ASSUME"
-Write-Host "Variables: AWS_REGION, AWS_ECR_REPO, AWS_LAMBDA_ROLE_ARN"
+Write-Host "Variables: AWS_REGION, AWS_ECR_REPO, AWS_LAMBDA_ROLE_ARN, AWS_STATE_BUCKET"
