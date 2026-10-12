@@ -2,8 +2,9 @@
 # AWS Teardown Script (reverses infra/aws/setup.ps1 + the Lambda created by deploy.yml)
 # ==============================================================================
 # Safe to re-run: resources that are already gone are skipped.
-# The GitHub OIDC provider is account-wide (other repos may use it), so it is
-# only removed when -DeleteOidcProvider is passed.
+# The GitHub OIDC provider is account-wide (other apps in the same AWS account may
+# use it), so it is only removed when -DeleteOidcProvider is passed and no IAM role
+# trusts it any more.
 param(
     [string]$Region = "us-east-1",
     [string]$AppName = "ragprod",
@@ -109,7 +110,7 @@ Write-Host "   S3 state bucket (all versions):  $stateBucket"
 Write-Host "   Secrets Manager (no recovery):   $($SecretNames -join ', ')"
 Write-Host "   IAM roles:                       $lambdaRoleName, $GitHubRoleName"
 if ($DeleteOidcProvider) {
-    Write-Host "   GitHub OIDC provider:            $oidcProviderArn"
+    Write-Host "   GitHub OIDC provider:            $oidcProviderArn (only if no other IAM role trusts it)"
 }
 
 if (-not $Force) {
@@ -160,8 +161,15 @@ Remove-IamRole -RoleName $lambdaRoleName
 Remove-IamRole -RoleName $GitHubRoleName
 
 if ($DeleteOidcProvider) {
-    Write-Host "`n7. Deleting GitHub OIDC provider..." -ForegroundColor Cyan
-    Invoke-AwsDelete -Description "GitHub OIDC provider" -CmdArgs @("iam", "delete-open-id-connect-provider", "--open-id-connect-provider-arn", $oidcProviderArn)
+    Write-Host "`n7. Deleting GitHub OIDC provider unless another IAM role still trusts it..." -ForegroundColor Cyan
+    # Other apps in the same AWS account may federate through the same provider
+    $trusting = Invoke-AwsCmd -CmdArgs @("iam", "list-roles", "--query", "Roles[?contains(to_string(AssumeRolePolicyDocument), 'token.actions.githubusercontent.com')].RoleName", "--output", "text")
+    $trustingRoles = @(($trusting | Out-String) -split "\s+" | Where-Object { $_ -and $_ -ne "None" })
+    if ($trustingRoles.Count -gt 0) {
+        Write-Host "   Keeping the GitHub OIDC provider: still trusted by IAM role(s) $($trustingRoles -join ', ')." -ForegroundColor Yellow
+    } else {
+        Invoke-AwsDelete -Description "GitHub OIDC provider" -CmdArgs @("iam", "delete-open-id-connect-provider", "--open-id-connect-provider-arn", $oidcProviderArn)
+    }
 } else {
     Write-Host "`n7. Keeping GitHub OIDC provider (account-wide). Pass -DeleteOidcProvider to remove it." -ForegroundColor DarkGray
 }
