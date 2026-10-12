@@ -83,25 +83,25 @@ try {
 
 # 2. AWS Secrets Manager Seeding
 Write-Host "`n3. Seeding secrets into AWS Secrets Manager..." -ForegroundColor Cyan
-$groqKey = Read-Host "Enter GROQ_API_KEY (press Enter to skip if already created)"
-if ($groqKey) {
-    if (Test-AwsResourceExists -CmdArgs @("secretsmanager", "describe-secret", "--secret-id", "GROQ_API_KEY", "--region", $Region)) {
-        Invoke-AwsCmd -CmdArgs @("secretsmanager", "put-secret-value", "--secret-id", "GROQ_API_KEY", "--secret-string", $groqKey, "--region", $Region) | Out-Null
-        Write-Host "   Updated GROQ_API_KEY in AWS Secrets Manager." -ForegroundColor Green
-    } else {
-        Invoke-AwsCmd -CmdArgs @("secretsmanager", "create-secret", "--name", "GROQ_API_KEY", "--secret-string", $groqKey, "--region", $Region) | Out-Null
-        Write-Host "   Created GROQ_API_KEY in AWS Secrets Manager." -ForegroundColor Green
+$secretNames = @("GROQ_API_KEY", "GOOGLE_API_KEY")
+foreach ($secretName in $secretNames) {
+    # Typed without echo, and handed to the CLI through a BOM-less temp file so the key never appears on a command line
+    $secureKey = Read-Host "Enter $secretName (press Enter to skip if already created)" -AsSecureString
+    if ($secureKey.Length -eq 0) {
+        continue
     }
-}
-
-$googleKey = Read-Host "Enter GOOGLE_API_KEY (press Enter to skip if already created)"
-if ($googleKey) {
-    if (Test-AwsResourceExists -CmdArgs @("secretsmanager", "describe-secret", "--secret-id", "GOOGLE_API_KEY", "--region", $Region)) {
-        Invoke-AwsCmd -CmdArgs @("secretsmanager", "put-secret-value", "--secret-id", "GOOGLE_API_KEY", "--secret-string", $googleKey, "--region", $Region) | Out-Null
-        Write-Host "   Updated GOOGLE_API_KEY in AWS Secrets Manager." -ForegroundColor Green
-    } else {
-        Invoke-AwsCmd -CmdArgs @("secretsmanager", "create-secret", "--name", "GOOGLE_API_KEY", "--secret-string", $googleKey, "--region", $Region) | Out-Null
-        Write-Host "   Created GOOGLE_API_KEY in AWS Secrets Manager." -ForegroundColor Green
+    $tempKey = [System.IO.Path]::GetTempFileName()
+    try {
+        Write-JsonFileNoBOM -FilePath $tempKey -JsonContent ([System.Net.NetworkCredential]::new("", $secureKey).Password)
+        if (Test-AwsResourceExists -CmdArgs @("secretsmanager", "describe-secret", "--secret-id", $secretName, "--region", $Region)) {
+            Invoke-AwsCmd -CmdArgs @("secretsmanager", "put-secret-value", "--secret-id", $secretName, "--secret-string", "file://$tempKey", "--region", $Region) | Out-Null
+            Write-Host "   Updated $secretName in AWS Secrets Manager." -ForegroundColor Green
+        } else {
+            Invoke-AwsCmd -CmdArgs @("secretsmanager", "create-secret", "--name", $secretName, "--secret-string", "file://$tempKey", "--region", $Region) | Out-Null
+            Write-Host "   Created $secretName in AWS Secrets Manager." -ForegroundColor Green
+        }
+    } finally {
+        Remove-Item $tempKey -ErrorAction SilentlyContinue
     }
 }
 

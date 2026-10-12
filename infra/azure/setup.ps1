@@ -58,16 +58,20 @@ Write-Host "   RBAC permissions configured. Waiting 10s for Azure RBAC propagati
 Start-Sleep -Seconds 10
 
 Write-Host "4. Seeding secrets into Key Vault '$kvName'..." -ForegroundColor Cyan
-$groqKey = Read-Host "Enter GROQ_API_KEY (press Enter to skip if using env fallback)"
-if ($groqKey) {
-    az keyvault secret set --vault-name $kvName --name "GROQ-API-KEY" --value $groqKey | Out-Null
-    Write-Host "   GROQ-API-KEY stored in Key Vault." -ForegroundColor Green
-}
-
-$googleKey = Read-Host "Enter GOOGLE_API_KEY (press Enter to skip if using env fallback)"
-if ($googleKey) {
-    az keyvault secret set --vault-name $kvName --name "GOOGLE-API-KEY" --value $googleKey | Out-Null
-    Write-Host "   GOOGLE-API-KEY stored in Key Vault." -ForegroundColor Green
+foreach ($secretName in @("GROQ_API_KEY", "GOOGLE_API_KEY")) {
+    # Typed without echo, and handed to az through a BOM-less temp file so the key never appears on a command line
+    $secureKey = Read-Host "Enter $secretName (press Enter to skip if using env fallback)" -AsSecureString
+    if ($secureKey.Length -gt 0) {
+        $kvSecretName = $secretName.Replace("_", "-")  # Key Vault secret names cannot contain underscores
+        $tempKey = [System.IO.Path]::GetTempFileName()
+        try {
+            [System.IO.File]::WriteAllText($tempKey, [System.Net.NetworkCredential]::new("", $secureKey).Password, [System.Text.UTF8Encoding]::new($false))
+            az keyvault secret set --vault-name $kvName --name $kvSecretName --file $tempKey --encoding utf-8 | Out-Null
+            Write-Host "   $kvSecretName stored in Key Vault." -ForegroundColor Green
+        } finally {
+            Remove-Item $tempKey -ErrorAction SilentlyContinue
+        }
+    }
 }
 
 Write-Host "5. Dynamically resolving GitHub OIDC Subject for '$GitHubRepo'..." -ForegroundColor Cyan
