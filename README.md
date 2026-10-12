@@ -119,7 +119,7 @@ Every setting has a working local default, and the cloud values are set by `infr
 
 Prerequisites: PowerShell, the Azure CLI signed in (`az login`) with permission to create role assignments and app registrations, the AWS CLI with an admin profile, and your own GitHub copy of this repository (pass `-GitHubRepo <owner>/<repo>` to both setup scripts).
 
-1. Run `.\infra\azure\setup.ps1`, then `$env:AWS_PROFILE = "<admin-profile>"; .\infra\aws\setup.ps1`. Both ask for the Groq and Google API keys and print the values for the next step. They also give the GitHub Actions identities read/write access to the state snapshots, which the daily data workflow needs.
+1. Run `.\infra\azure\setup.ps1`, then `$env:AWS_PROFILE = "<admin-profile>"; .\infra\aws\setup.ps1`. Both ask for the Groq and Google API keys (typing is hidden; Enter skips a key) and print the values for the next step. They also give the GitHub Actions identities read/write access to the state snapshots, which the daily data workflow needs. The AWS script rewrites both IAM roles' trust and inline policies on every run, so rerunning it brings existing roles up to date. Its GitHub role only accepts workflow runs on `main` of the repository given by `-GitHubRepo`, and only acts on this app's ECR repository and Lambda function.
 2. Add those values in GitHub → Settings → Secrets and variables → Actions:
 
    | Secrets | Variables |
@@ -207,7 +207,7 @@ The release notes are one source with a 10-release window: a new release replace
 
 ### Teardown
 
-Disable the Deploy workflow first (otherwise the next push re-creates the Lambda function), then run `.\infra\azure\teardown.ps1` and `.\infra\aws\teardown.ps1`. They list everything the setup scripts and deploys created, including all state snapshots, ask for confirmation, delete it, and are safe to re-run. Add `-DeleteOidcProvider` to the AWS script if no other repository in the account uses GitHub OIDC. To deploy again, repeat the steps above; only `AZURE_CLIENT_ID` and `DEPLOYED_APP_URL` change. If you created the Vercel project, delete it under its Settings → Advanced.
+Disable the Deploy workflow first (otherwise the next push re-creates the Lambda function), then run `.\infra\azure\teardown.ps1` and `.\infra\aws\teardown.ps1`. They list everything the setup scripts and deploys created, including all state snapshots, ask for confirmation, delete it, and are safe to re-run. Add `-DeleteOidcProvider` to the AWS script to also delete the account's GitHub OIDC provider; it is kept while any other IAM role still trusts it. To deploy again, repeat the steps above; only `AZURE_CLIENT_ID` and `DEPLOYED_APP_URL` change. If you created the Vercel project, delete it under its Settings → Advanced.
 
 ## Known limitations
 
