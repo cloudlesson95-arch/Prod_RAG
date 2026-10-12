@@ -23,7 +23,8 @@ if ($LASTEXITCODE -ne 0 -or -not $account) {
 Write-Host "   Subscription: $($account.name) ($($account.id))" -ForegroundColor Green
 
 $rgExists = (az group exists --name $ResourceGroupName) -eq "true"
-$appIds = @(az ad app list --display-name $GitHubAppName --query "[].appId" -o tsv | Where-Object { $_ })
+# Exact name: --display-name would also match every app registration whose name only starts with it
+$appIds = @(az ad app list --filter "displayName eq '$GitHubAppName'" --query "[].appId" -o tsv | Where-Object { $_ })
 
 Write-Host "`nThe following resources will be PERMANENTLY deleted:" -ForegroundColor Yellow
 if ($rgExists) {

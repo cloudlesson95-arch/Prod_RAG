@@ -89,14 +89,16 @@ try {
 }
 
 $appName = "github-actions-ragprod"
-$app = az ad app list --display-name $appName -o json | ConvertFrom-Json
-
-if ($app.Count -eq 0) {
-    $app = az ad app create --display-name $appName --output json | ConvertFrom-Json
-} else {
-    $app = $app[0]
+# Exact name: --display-name would also match every app registration whose name only starts with it
+$appIds = @(az ad app list --filter "displayName eq '$appName'" --query "[].appId" -o tsv | Where-Object { $_ })
+if ($appIds.Count -gt 1) {
+    throw "Several app registrations are named '$appName' ($($appIds -join ', ')). Delete the extra ones, then rerun this script."
 }
-$appId = $app.appId
+if ($appIds.Count -eq 0) {
+    $appId = az ad app create --display-name $appName --query appId -o tsv
+} else {
+    $appId = $appIds[0]
+}
 
 # Ensure Service Principal exists
 $sp = az ad sp list --filter "appId eq '$appId'" -o json | ConvertFrom-Json
