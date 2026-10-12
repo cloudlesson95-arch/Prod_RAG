@@ -241,11 +241,25 @@ if (Test-AwsResourceExists -CmdArgs @("iam", "get-open-id-connect-provider", "--
 
 $githubRoleName = "github-actions-ragprod-aws-role"
 
-# Dynamically split "owner/repo" into owner and repo parts to handle optional numeric ID tags
-$repoParts = $GitHubRepo.Split('/')
-$ghOwner = $repoParts[0]
-$ghRepo = $repoParts[1]
-$subPattern = "repo:${ghOwner}*/*${ghRepo}*:*"
+# Trust only the main branch of this repository, in both subject formats GitHub issues:
+# "repo:OWNER/REPO:..." and, for newer or opted-in repositories, "repo:OWNER@OWNER_ID/REPO@REPO_ID:..."
+try {
+    $githubApi = Invoke-RestMethod -Uri "https://api.github.com/repos/$GitHubRepo" -UserAgent "PowerShell" -ErrorAction Stop
+    if (-not ($githubApi.full_name -and $githubApi.id -and $githubApi.owner.id)) {
+        throw "unexpected response from the GitHub API"
+    }
+    # full_name has the exact spelling: IAM compares the subject case-sensitively
+    $ghOwner, $ghRepo = $githubApi.full_name.Split('/')
+    $taggedSubject = "repo:${ghOwner}@$($githubApi.owner.id)/${ghRepo}@$($githubApi.id):ref:refs/heads/main"
+} catch {
+    $ghOwner, $ghRepo = $GitHubRepo.Split('/')
+    # "@" can't appear in GitHub owner or repository names, so these wildcards can only stand for the numeric IDs
+    $taggedSubject = "repo:${ghOwner}@*/${ghRepo}@*:ref:refs/heads/main"
+    Write-Warning "GitHub API lookup of '$GitHubRepo' failed ($($_.Exception.Message)). The role trusts '$taggedSubject' until you rerun this script with the lookup working."
+}
+$plainSubject = "repo:${ghOwner}/${ghRepo}:ref:refs/heads/main"
+Write-Host "   Trusted OIDC subjects: $plainSubject" -ForegroundColor Green
+Write-Host "                          $taggedSubject" -ForegroundColor Green
 
 $githubTrustPolicy = @{
     Version = "2012-10-17"
@@ -256,67 +270,70 @@ $githubTrustPolicy = @{
             Action = "sts:AssumeRoleWithWebIdentity"
             Condition = @{
                 StringEquals = @{ "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com" }
-                StringLike = @{ "token.actions.githubusercontent.com:sub" = $subPattern }
+                StringLike = @{ "token.actions.githubusercontent.com:sub" = @($plainSubject, $taggedSubject) }
             }
+        }
+    )
+} | ConvertTo-Json -Depth 6
+
+$deployPolicy = @{
+    Version = "2012-10-17"
+    Statement = @(
+        @{
+            Effect = "Allow"
+            Action = @(
+                "ecr:GetAuthorizationToken",
+                "ecr:BatchCheckLayerAvailability",
+                "ecr:GetDownloadUrlForLayer",
+                "ecr:BatchGetImage",
+                "ecr:PutImage",
+                "ecr:InitiateLayerUpload",
+                "ecr:UploadLayerPart",
+                "ecr:CompleteLayerUpload"
+            )
+            Resource = "*"
+        },
+        @{
+            Effect = "Allow"
+            Action = @(
+                "lambda:CreateFunction",
+                "lambda:UpdateFunctionCode",
+                "lambda:UpdateFunctionConfiguration",
+                "lambda:GetFunction",
+                "lambda:GetFunctionConfiguration",
+                "lambda:CreateFunctionUrlConfig",
+                "lambda:GetFunctionUrlConfig",
+                "lambda:AddPermission"
+            )
+            Resource = "*"
+        },
+        @{
+            Effect = "Allow"
+            Action = "iam:PassRole"
+            Resource = $lambdaRoleArn
         }
     )
 } | ConvertTo-Json -Depth 5
 
-if (Test-AwsResourceExists -CmdArgs @("iam", "get-role", "--role-name", $githubRoleName)) {
-    Write-Host "   GitHub Actions IAM Role '$githubRoleName' already exists." -ForegroundColor Green
-} else {
-    $tempTrust = [System.IO.Path]::GetTempFileName()
-    $tempPolicy = [System.IO.Path]::GetTempFileName()
-    try {
-        Write-JsonFileNoBOM -FilePath $tempTrust -JsonContent $githubTrustPolicy
+# The role is created once; its trust and inline policies are rewritten on every run, so a rerun updates an existing role
+$tempTrust = [System.IO.Path]::GetTempFileName()
+$tempPolicy = [System.IO.Path]::GetTempFileName()
+try {
+    Write-JsonFileNoBOM -FilePath $tempTrust -JsonContent $githubTrustPolicy
+    if (Test-AwsResourceExists -CmdArgs @("iam", "get-role", "--role-name", $githubRoleName)) {
+        Invoke-AwsCmd -CmdArgs @("iam", "update-assume-role-policy", "--role-name", $githubRoleName, "--policy-document", "file://$tempTrust") | Out-Null
+        Write-Host "   GitHub Actions IAM Role '$githubRoleName' already exists; trust policy rewritten." -ForegroundColor Green
+    } else {
         Invoke-AwsCmd -CmdArgs @("iam", "create-role", "--role-name", $githubRoleName, "--assume-role-policy-document", "file://$tempTrust") | Out-Null
-
-        $deployPolicy = @{
-            Version = "2012-10-17"
-            Statement = @(
-                @{
-                    Effect = "Allow"
-                    Action = @(
-                        "ecr:GetAuthorizationToken",
-                        "ecr:BatchCheckLayerAvailability",
-                        "ecr:GetDownloadUrlForLayer",
-                        "ecr:BatchGetImage",
-                        "ecr:PutImage",
-                        "ecr:InitiateLayerUpload",
-                        "ecr:UploadLayerPart",
-                        "ecr:CompleteLayerUpload"
-                    )
-                    Resource = "*"
-                },
-                @{
-                    Effect = "Allow"
-                    Action = @(
-                        "lambda:CreateFunction",
-                        "lambda:UpdateFunctionCode",
-                        "lambda:UpdateFunctionConfiguration",
-                        "lambda:GetFunction",
-                        "lambda:GetFunctionConfiguration",
-                        "lambda:CreateFunctionUrlConfig",
-                        "lambda:GetFunctionUrlConfig",
-                        "lambda:AddPermission"
-                    )
-                    Resource = "*"
-                },
-                @{
-                    Effect = "Allow"
-                    Action = "iam:PassRole"
-                    Resource = $lambdaRoleArn
-                }
-            )
-        } | ConvertTo-Json -Depth 5
-
-        Write-JsonFileNoBOM -FilePath $tempPolicy -JsonContent $deployPolicy
-        Invoke-AwsCmd -CmdArgs @("iam", "put-role-policy", "--role-name", $githubRoleName, "--policy-name", "GitHubActionsDeployPolicy", "--policy-document", "file://$tempPolicy") | Out-Null
         Write-Host "   Created GitHub Actions OIDC IAM Role '$githubRoleName'." -ForegroundColor Green
-    } finally {
-        Remove-Item $tempTrust -ErrorAction SilentlyContinue
-        Remove-Item $tempPolicy -ErrorAction SilentlyContinue
     }
+
+    Write-JsonFileNoBOM -FilePath $tempPolicy -JsonContent $deployPolicy
+    Invoke-AwsCmd -CmdArgs @("iam", "put-role-policy", "--role-name", $githubRoleName, "--policy-name", "GitHubActionsDeployPolicy", "--policy-document", "file://$tempPolicy") | Out-Null
+    Write-Host "   Deploy policy applied to '$githubRoleName'." -ForegroundColor Green
+} finally {
+    Remove-Item $tempTrust -ErrorAction SilentlyContinue
+    Remove-Item $tempPolicy -ErrorAction SilentlyContinue
 }
 $githubRoleArn = "arn:aws:iam::${awsAccountId}:role/$githubRoleName"
 
