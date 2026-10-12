@@ -9,6 +9,13 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# Runs az with its stderr discarded. Windows PowerShell turns redirected native stderr (az's warnings included)
+# into errors, which the "Stop" preference above would make terminating
+function Invoke-AzQuiet {
+    $ErrorActionPreference = "Continue"
+    az @args 2>$null
+}
+
 # Use script directory to locate Bicep files reliably
 $bicepFile = Join-Path $PSScriptRoot "main.bicep"
 $paramFile = Join-Path $PSScriptRoot "parameters.json"
@@ -37,22 +44,22 @@ Write-Host "3. Setting up RBAC permissions..." -ForegroundColor Cyan
 $kvId = (az keyvault show --name $kvName --query id -o tsv)
 
 # Grant Managed Identity read access to Key Vault
-az role assignment create --assignee $managedIdentityPrincipalId --role "Key Vault Secrets User" --scope $kvId 2>$null | Out-Null
+Invoke-AzQuiet role assignment create --assignee $managedIdentityPrincipalId --role "Key Vault Secrets User" --scope $kvId | Out-Null
 
 # Grant Managed Identity AcrPull access to ACR
 $acrId = (az acr show --name $acrName --query id -o tsv)
-az role assignment create --assignee $managedIdentityPrincipalId --role "AcrPull" --scope $acrId 2>$null | Out-Null
+Invoke-AzQuiet role assignment create --assignee $managedIdentityPrincipalId --role "AcrPull" --scope $acrId | Out-Null
 
 # Grant current signed-in user write access to Key Vault (Key Vault Secrets Officer)
-$currentUser = (az ad signed-in-user show --query id -o tsv 2>$null)
+$currentUser = (Invoke-AzQuiet ad signed-in-user show --query id -o tsv)
 if (-not $currentUser) {
     $currentUser = (az account show --query user.name -o tsv)
 }
-az role assignment create --assignee $currentUser --role "Key Vault Secrets Officer" --scope $kvId 2>$null | Out-Null
+Invoke-AzQuiet role assignment create --assignee $currentUser --role "Key Vault Secrets Officer" --scope $kvId | Out-Null
 
 # Grant Managed Identity (the app) and current user (the state CLI) read/write access to the state snapshot container
-az role assignment create --assignee $managedIdentityPrincipalId --role "Storage Blob Data Contributor" --scope $stateContainerId 2>$null | Out-Null
-az role assignment create --assignee $currentUser --role "Storage Blob Data Contributor" --scope $stateContainerId 2>$null | Out-Null
+Invoke-AzQuiet role assignment create --assignee $managedIdentityPrincipalId --role "Storage Blob Data Contributor" --scope $stateContainerId | Out-Null
+Invoke-AzQuiet role assignment create --assignee $currentUser --role "Storage Blob Data Contributor" --scope $stateContainerId | Out-Null
 
 Write-Host "   RBAC permissions configured. Waiting 10s for Azure RBAC propagation..." -ForegroundColor Green
 Start-Sleep -Seconds 10
@@ -108,14 +115,14 @@ if ($sp.Count -eq 0) {
 
 # Grant Contributor role on the resource group to GitHub Actions
 $rgId = (az group show --name $ResourceGroupName --query id -o tsv)
-az role assignment create --assignee $appId --role "Contributor" --scope $rgId 2>$null | Out-Null
+Invoke-AzQuiet role assignment create --assignee $appId --role "Contributor" --scope $rgId | Out-Null
 
 # Grant AcrPush on ACR to GitHub Actions
-az role assignment create --assignee $appId --role "AcrPush" --scope $acrId 2>$null | Out-Null
+Invoke-AzQuiet role assignment create --assignee $appId --role "AcrPush" --scope $acrId | Out-Null
 
 # Grant the scheduled collect-data workflow read/write access to the state snapshots
 # (Contributor covers the control plane only; blob contents need a data-plane role)
-az role assignment create --assignee $appId --role "Storage Blob Data Contributor" --scope $stateContainerId 2>$null | Out-Null
+Invoke-AzQuiet role assignment create --assignee $appId --role "Storage Blob Data Contributor" --scope $stateContainerId | Out-Null
 
 # Federated credentials for the main branch, in both subject formats GitHub issues. Each is created when missing
 # and rewritten when it differs, so a rerun (after a repository rename, say) brings an existing one up to date
