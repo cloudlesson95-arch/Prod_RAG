@@ -12,6 +12,8 @@ function Invoke-AwsCmd {
     param(
         [string[]]$CmdArgs
     )
+    # Windows PowerShell turns redirected native stderr into errors, which a caller's "Stop" preference makes terminating
+    $ErrorActionPreference = "Continue"
     $output = & aws @CmdArgs 2>&1
     if ($LASTEXITCODE -ne 0) {
         $errorMsg = ($output | Out-String).Trim()
@@ -25,6 +27,8 @@ function Test-AwsResourceExists {
     param(
         [string[]]$CmdArgs
     )
+    # As in Invoke-AwsCmd: a "not found" on stderr must return $false, not throw
+    $ErrorActionPreference = "Continue"
     $null = & aws @CmdArgs 2>$null
     return ($LASTEXITCODE -eq 0)
 }
