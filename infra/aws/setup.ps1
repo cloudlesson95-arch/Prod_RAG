@@ -276,13 +276,22 @@ $githubTrustPolicy = @{
     )
 } | ConvertTo-Json -Depth 6
 
+$lambdaFunctionName = "ragprod-api"  # created and updated by deploy.yml, restarted by collect-data.yml
+$ecrRepoArn = "arn:aws:ecr:${Region}:${awsAccountId}:repository/$ecrRepoName"
+$lambdaFunctionArn = "arn:aws:lambda:${Region}:${awsAccountId}:function:$lambdaFunctionName"
+
 $deployPolicy = @{
     Version = "2012-10-17"
     Statement = @(
         @{
+            # AWS doesn't support resource-level permissions for this action
+            Effect = "Allow"
+            Action = "ecr:GetAuthorizationToken"
+            Resource = "*"
+        },
+        @{
             Effect = "Allow"
             Action = @(
-                "ecr:GetAuthorizationToken",
                 "ecr:BatchCheckLayerAvailability",
                 "ecr:GetDownloadUrlForLayer",
                 "ecr:BatchGetImage",
@@ -291,9 +300,10 @@ $deployPolicy = @{
                 "ecr:UploadLayerPart",
                 "ecr:CompleteLayerUpload"
             )
-            Resource = "*"
+            Resource = $ecrRepoArn
         },
         @{
+            # What deploy.yml and collect-data.yml call ("aws lambda wait function-updated" polls GetFunctionConfiguration)
             Effect = "Allow"
             Action = @(
                 "lambda:CreateFunction",
@@ -305,12 +315,13 @@ $deployPolicy = @{
                 "lambda:GetFunctionUrlConfig",
                 "lambda:AddPermission"
             )
-            Resource = "*"
+            Resource = $lambdaFunctionArn
         },
         @{
             Effect = "Allow"
             Action = "iam:PassRole"
             Resource = $lambdaRoleArn
+            Condition = @{ StringEquals = @{ "iam:PassedToService" = "lambda.amazonaws.com" } }
         }
     )
 } | ConvertTo-Json -Depth 5
