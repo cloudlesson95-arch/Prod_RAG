@@ -119,35 +119,39 @@ $lambdaTrustPolicy = @{
     )
 } | ConvertTo-Json -Depth 3
 
-if (Test-AwsResourceExists -CmdArgs @("iam", "get-role", "--role-name", $lambdaRoleName)) {
-    Write-Host "   IAM Role '$lambdaRoleName' already exists." -ForegroundColor Green
-} else {
-    $tempTrust = [System.IO.Path]::GetTempFileName()
-    $tempPolicy = [System.IO.Path]::GetTempFileName()
-    try {
-        Write-JsonFileNoBOM -FilePath $tempTrust -JsonContent $lambdaTrustPolicy
+# Only this app's secrets; Secrets Manager appends "-" and 6 random characters to each secret's ARN
+$secretsPolicy = @{
+    Version = "2012-10-17"
+    Statement = @(
+        @{
+            Effect = "Allow"
+            Action = @("secretsmanager:GetSecretValue")
+            Resource = @($secretNames | ForEach-Object { "arn:aws:secretsmanager:${Region}:${awsAccountId}:secret:$($_)-??????" })
+        }
+    )
+} | ConvertTo-Json -Depth 4
+
+# The role is created once; its trust and inline policies are rewritten on every run, so a rerun updates an existing role
+$tempTrust = [System.IO.Path]::GetTempFileName()
+$tempPolicy = [System.IO.Path]::GetTempFileName()
+try {
+    Write-JsonFileNoBOM -FilePath $tempTrust -JsonContent $lambdaTrustPolicy
+    if (Test-AwsResourceExists -CmdArgs @("iam", "get-role", "--role-name", $lambdaRoleName)) {
+        Invoke-AwsCmd -CmdArgs @("iam", "update-assume-role-policy", "--role-name", $lambdaRoleName, "--policy-document", "file://$tempTrust") | Out-Null
+        Write-Host "   IAM Role '$lambdaRoleName' already exists; trust policy rewritten." -ForegroundColor Green
+    } else {
         Invoke-AwsCmd -CmdArgs @("iam", "create-role", "--role-name", $lambdaRoleName, "--assume-role-policy-document", "file://$tempTrust") | Out-Null
         Invoke-AwsCmd -CmdArgs @("iam", "attach-role-policy", "--role-name", $lambdaRoleName, "--policy-arn", "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole") | Out-Null
         Invoke-AwsCmd -CmdArgs @("iam", "attach-role-policy", "--role-name", $lambdaRoleName, "--policy-arn", "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly") | Out-Null
-
-        $secretsPolicy = @{
-            Version = "2012-10-17"
-            Statement = @(
-                @{
-                    Effect = "Allow"
-                    Action = @("secretsmanager:GetSecretValue")
-                    Resource = "*"
-                }
-            )
-        } | ConvertTo-Json -Depth 3
-
-        Write-JsonFileNoBOM -FilePath $tempPolicy -JsonContent $secretsPolicy
-        Invoke-AwsCmd -CmdArgs @("iam", "put-role-policy", "--role-name", $lambdaRoleName, "--policy-name", "SecretsManagerRead", "--policy-document", "file://$tempPolicy") | Out-Null
         Write-Host "   Created IAM Role '$lambdaRoleName'." -ForegroundColor Green
-    } finally {
-        Remove-Item $tempTrust -ErrorAction SilentlyContinue
-        Remove-Item $tempPolicy -ErrorAction SilentlyContinue
     }
+
+    Write-JsonFileNoBOM -FilePath $tempPolicy -JsonContent $secretsPolicy
+    Invoke-AwsCmd -CmdArgs @("iam", "put-role-policy", "--role-name", $lambdaRoleName, "--policy-name", "SecretsManagerRead", "--policy-document", "file://$tempPolicy") | Out-Null
+    Write-Host "   Read access to $($secretNames -join ', ') applied to '$lambdaRoleName'." -ForegroundColor Green
+} finally {
+    Remove-Item $tempTrust -ErrorAction SilentlyContinue
+    Remove-Item $tempPolicy -ErrorAction SilentlyContinue
 }
 $lambdaRoleArn = "arn:aws:iam::${awsAccountId}:role/$lambdaRoleName"
 
