@@ -117,41 +117,43 @@ az role assignment create --assignee $appId --role "AcrPush" --scope $acrId 2>$n
 # (Contributor covers the control plane only; blob contents need a data-plane role)
 az role assignment create --assignee $appId --role "Storage Blob Data Contributor" --scope $stateContainerId 2>$null | Out-Null
 
-# Create Federated Credentials for standard subject format
+# Federated credentials for the main branch, in both subject formats GitHub issues. Each is created when missing
+# and rewritten when it differs, so a rerun (after a repository rename, say) brings an existing one up to date
+$issuer = "https://token.actions.githubusercontent.com"
+$wantedCreds = @(@{ name = "github-actions-main"; subject = $stdSubject; description = "GitHub Actions OIDC for main branch deploy" })
+if ($taggedSubject) {
+    $wantedCreds += @{ name = "github-actions-main-tagged"; subject = $taggedSubject; description = "GitHub Actions OIDC with ID tags" }
+} else {
+    Write-Warning "GitHub API lookup of '$GitHubRepo' failed, so the ID-tagged federated credential was left as it is. Rerun this script once the lookup works."
+}
 $fedCreds = az ad app federated-credential list --id $appId -o json | ConvertFrom-Json
-$fedExists = $fedCreds | Where-Object { $_.name -eq "github-actions-main" }
-
-if (-not $fedExists) {
+foreach ($wanted in $wantedCreds) {
+    $current = $fedCreds | Where-Object { $_.name -eq $wanted.name }
+    if ($current -and $current.subject -eq $wanted.subject -and $current.issuer -eq $issuer -and (@($current.audiences) -join ",") -eq "api://AzureADTokenExchange") {
+        continue
+    }
     $params = @{
-        name = "github-actions-main"
-        issuer = "https://token.actions.githubusercontent.com"
-        subject = $stdSubject
-        description = "GitHub Actions OIDC for main branch deploy"
+        name = $wanted.name
+        issuer = $issuer
+        subject = $wanted.subject
+        description = $wanted.description
         audiences = @("api://AzureADTokenExchange")
     } | ConvertTo-Json -Depth 3
 
     $tempFile = [System.IO.Path]::GetTempFileName()
-    $params | Out-File -FilePath $tempFile -Encoding utf8
-    az ad app federated-credential create --id $appId --parameters $tempFile | Out-Null
-    Remove-Item $tempFile
-}
-
-# Create Federated Credential for ID-tagged subject format if applicable
-if ($taggedSubject) {
-    $fedTaggedExists = $fedCreds | Where-Object { $_.name -eq "github-actions-main-tagged" }
-    if (-not $fedTaggedExists) {
-        $paramsTagged = @{
-            name = "github-actions-main-tagged"
-            issuer = "https://token.actions.githubusercontent.com"
-            subject = $taggedSubject
-            description = "GitHub Actions OIDC with ID tags"
-            audiences = @("api://AzureADTokenExchange")
-        } | ConvertTo-Json -Depth 3
-
-        $tempFileTagged = [System.IO.Path]::GetTempFileName()
-        $paramsTagged | Out-File -FilePath $tempFileTagged -Encoding utf8
-        az ad app federated-credential create --id $appId --parameters $tempFileTagged 2>$null | Out-Null
-        Remove-Item $tempFileTagged
+    try {
+        [System.IO.File]::WriteAllText($tempFile, $params, [System.Text.UTF8Encoding]::new($false))
+        if ($current) {
+            az ad app federated-credential update --id $appId --federated-credential-id $current.id --parameters $tempFile | Out-Null
+        } else {
+            az ad app federated-credential create --id $appId --parameters $tempFile | Out-Null
+        }
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to write federated credential '$($wanted.name)'."
+        }
+        Write-Host "   Federated credential '$($wanted.name)' set to $($wanted.subject)." -ForegroundColor Green
+    } finally {
+        Remove-Item $tempFile -ErrorAction SilentlyContinue
     }
 }
 
