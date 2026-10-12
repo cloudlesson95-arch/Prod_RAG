@@ -142,8 +142,15 @@ try {
     } else {
         Invoke-AwsCmd -CmdArgs @("iam", "create-role", "--role-name", $lambdaRoleName, "--assume-role-policy-document", "file://$tempTrust") | Out-Null
         Invoke-AwsCmd -CmdArgs @("iam", "attach-role-policy", "--role-name", $lambdaRoleName, "--policy-arn", "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole") | Out-Null
-        Invoke-AwsCmd -CmdArgs @("iam", "attach-role-policy", "--role-name", $lambdaRoleName, "--policy-arn", "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly") | Out-Null
         Write-Host "   Created IAM Role '$lambdaRoleName'." -ForegroundColor Green
+    }
+
+    # Lambda pulls the image with its own service principal through the repository policy above, so the role needs no ECR access
+    $ecrReadOnlyArn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
+    $attached = Invoke-AwsCmd -CmdArgs @("iam", "list-attached-role-policies", "--role-name", $lambdaRoleName, "--query", "AttachedPolicies[].PolicyArn", "--output", "text")
+    if ((($attached | Out-String) -split "\s+") -contains $ecrReadOnlyArn) {
+        Invoke-AwsCmd -CmdArgs @("iam", "detach-role-policy", "--role-name", $lambdaRoleName, "--policy-arn", $ecrReadOnlyArn) | Out-Null
+        Write-Host "   Detached AmazonEC2ContainerRegistryReadOnly from '$lambdaRoleName'." -ForegroundColor Green
     }
 
     Write-JsonFileNoBOM -FilePath $tempPolicy -JsonContent $secretsPolicy
