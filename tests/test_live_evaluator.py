@@ -1,6 +1,7 @@
 import json
 
 import pytest
+import requests
 from unittest.mock import patch, MagicMock
 
 from src.evaluation import live_evaluator
@@ -117,3 +118,37 @@ def test_a_failing_event_store_does_not_change_the_result(tmp_path, stored_event
 
     assert (precision, passed) == (100.0, True)
     assert stored_events.records == []
+
+
+def run_with_responses(tmp_path, monkeypatch, *responses):
+    """One benchmark question against a fake deployment that sends the given responses in order; sleeps are recorded."""
+    sleeps = []
+    monkeypatch.setattr(live_evaluator.time, "sleep", sleeps.append)
+    with patch("src.evaluation.live_evaluator.load_questions", return_value=[ONE_QUESTION]), \
+         patch("src.evaluation.live_evaluator.create_llm", return_value=MagicMock()), \
+         patch("src.evaluation.live_evaluator.judge_answer", return_value=True), \
+         patch("requests.post", side_effect=list(responses)) as post, \
+         patch("src.evaluation.live_evaluator.DB_PATH", str(tmp_path / "eval.db")):
+        _, precision, _ = run_live_evaluation("https://app.example.io")
+    return precision, post.call_count, sleeps
+
+
+def test_a_503_is_asked_again_after_the_wait(tmp_path, monkeypatch):
+    """Verify a 503 makes live-eval wait at least 10 s (Retry-After was 3) and ask that question once more."""
+    limited = MagicMock(status_code=503, headers={"Retry-After": "3"})
+    answered = MagicMock(status_code=200)
+    answered.json.return_value = {"answer": "A clowder."}
+
+    precision, requests_sent, sleeps = run_with_responses(tmp_path, monkeypatch, limited, answered)
+
+    assert (requests_sent, sleeps, precision) == (2, [10], 100.0)
+
+
+def test_a_second_503_fails_the_question_after_one_capped_wait(tmp_path, monkeypatch):
+    """Verify live-eval waits at most 60 s (Retry-After was 120), asks only once more, and fails a second 503."""
+    limited = MagicMock(status_code=503, headers={"Retry-After": "120"})
+    limited.raise_for_status.side_effect = requests.HTTPError("503 Server Error: Service Unavailable")
+
+    precision, requests_sent, sleeps = run_with_responses(tmp_path, monkeypatch, limited, limited)
+
+    assert (requests_sent, sleeps, precision) == (2, [60], 0.0)

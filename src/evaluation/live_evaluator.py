@@ -1,4 +1,5 @@
 import requests
+import time
 from src.evaluation.evaluator import load_questions, judge_answer
 from src.evaluation.eval_db import save_eval_run
 from src.config import EVAL_QUESTIONS_PATH, DB_PATH, EVAL_LLM_MODEL, K_EVALUATION, ROUTING_METHOD, LIVE_EVAL_CLIENT
@@ -8,6 +9,28 @@ from src.storage.event_store import get_event_store
 from src.logging_config import setup_logging
 
 logger = setup_logging(__name__)
+
+# After a 503 (usually the LLM's rate limit), wait this long before asking the question once more: the server's
+# Retry-After, but at least the minimum, since one answer makes several LLM calls and the wait the server names
+# covers only its last one.
+RETRY_MIN_WAIT_SECONDS = 10
+RETRY_MAX_WAIT_SECONDS = 60
+
+
+def ask(endpoint: str, question: str) -> requests.Response:
+    """POST one question to /query; after a 503, wait as described above and ask once more."""
+    headers = {"X-RAG-Client": LIVE_EVAL_CLIENT}
+    response = requests.post(endpoint, json={"question": question}, headers=headers, timeout=60)
+    if response.status_code == 503:
+        try:
+            retry_after = float(response.headers.get("Retry-After"))
+        except (TypeError, ValueError):
+            retry_after = 0
+        wait = min(max(retry_after, RETRY_MIN_WAIT_SECONDS), RETRY_MAX_WAIT_SECONDS)
+        logger.info(f"\t503 (usually the LLM's rate limit); asking again in {wait:.0f} s")
+        time.sleep(wait)
+        response = requests.post(endpoint, json={"question": question}, headers=headers, timeout=60)
+    return response
 
 
 def run_live_evaluation(target_url: str, revision: str | None = None, questions_path: str = EVAL_QUESTIONS_PATH,
@@ -34,8 +57,7 @@ def run_live_evaluation(target_url: str, revision: str | None = None, questions_
     for i, q in enumerate(questions):
         logger.info(f"[{i+1}/{len(questions)}] Live Testing: '{q['query']}'")
         try:
-            response = requests.post(endpoint, json={"question": q["query"]}, headers={"X-RAG-Client": LIVE_EVAL_CLIENT},
-                                     timeout=60)
+            response = ask(endpoint, q["query"])
             response.raise_for_status()
             answer = response.json().get("answer", "")
 
