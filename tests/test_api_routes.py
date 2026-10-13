@@ -3,6 +3,14 @@ from starlette.routing import Mount
 
 from src.core import api
 from src.core.rag_agent import AnswerResult, Passage
+from src.core.utils import EmptyAnswerError
+
+
+def raising(error):
+    """A stand-in for answer_question that fails with error."""
+    def fail(*args, **kwargs):
+        raise error
+    return fail
 
 
 def test_mcp_root_mount_is_last_route():
@@ -68,6 +76,38 @@ def test_a_failing_event_store_does_not_fail_the_query(monkeypatch, fake_event_s
 
     assert response.status_code == 200
     assert response.json()["answer"] == "A clowder."
+
+
+def test_a_rate_limit_answers_503_with_retry_after(monkeypatch, fake_event_store, rate_limit_error):
+    """Verify a rate limit that outlasted the SDK's retries becomes 503 with the wait in Retry-After, and no routing event."""
+    monkeypatch.setattr(api, "event_store", fake_event_store)
+    monkeypatch.setattr(api, "answer_question", raising(rate_limit_error))
+
+    response = TestClient(api.app).post("/query", json={"question": "What is a group of cats called?"})
+
+    assert response.status_code == 503
+    assert response.headers["Retry-After"] == "7"
+    assert "try again in 7 s" in response.json()["detail"]
+    assert fake_event_store.records == []
+
+
+def test_a_twice_empty_answer_answers_502(monkeypatch):
+    """Verify an answer that stayed blank after the retry becomes 502, not 200 with empty text."""
+    monkeypatch.setattr(api, "answer_question", raising(EmptyAnswerError("The LLM returned an empty answer twice")))
+
+    response = TestClient(api.app).post("/query", json={"question": "Who is Elena Rostova?"})
+
+    assert response.status_code == 502
+
+
+def test_other_errors_still_answer_500(monkeypatch):
+    """Verify any other failure keeps today's 500 and detail."""
+    monkeypatch.setattr(api, "answer_question", raising(RuntimeError("boom")))
+
+    response = TestClient(api.app).post("/query", json={"question": "What is a group of cats called?"})
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Internal server error processing query"
 
 
 def test_health_reports_the_deployed_revision(monkeypatch):

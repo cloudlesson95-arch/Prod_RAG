@@ -2,6 +2,8 @@ import os
 import uuid
 
 import boto3
+import groq
+import httpx
 import pytest
 from azure.storage.blob import BlobServiceClient
 
@@ -64,6 +66,14 @@ class FakeEventStore:
 @pytest.fixture
 def fake_event_store():
     return FakeEventStore()
+
+
+@pytest.fixture
+def rate_limit_error():
+    """The error the Groq client raises once its own retries are spent, asking for a 7 s wait."""
+    request = httpx.Request("POST", "https://api.groq.com/openai/v1/chat/completions")
+    response = httpx.Response(429, headers={"retry-after": "7"}, request=request)
+    return groq.RateLimitError("Rate limit reached. Please try again in 6.015s.", response=response, body=None)
 
 
 @pytest.fixture

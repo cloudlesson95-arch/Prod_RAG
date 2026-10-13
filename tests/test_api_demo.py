@@ -75,3 +75,16 @@ def test_document_dropped_while_answering_returns_404(client, monkeypatch):
     monkeypatch.setattr(api, "answer_from_document", evicted_mid_answer)
     response = client.post(f"/demo/documents/{doc_id}/query", json={"question": "Where?"})
     assert response.status_code == 404
+
+
+def test_a_rate_limit_while_answering_returns_503(client, monkeypatch, rate_limit_error):
+    """Verify the demo answers a rate limit like /query: 503 with Retry-After (the document is still there, so not 404)."""
+    doc_id = upload(client).json()["doc_id"]
+
+    def rate_limited(doc, question, llm):
+        raise rate_limit_error
+
+    monkeypatch.setattr(api, "answer_from_document", rate_limited)
+    response = client.post(f"/demo/documents/{doc_id}/query", json={"question": "Where?"})
+    assert response.status_code == 503
+    assert response.headers["Retry-After"] == "7"

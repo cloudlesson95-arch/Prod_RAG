@@ -14,7 +14,7 @@ from src.config import (
     CORS_ALLOW_ORIGINS, APP_REVISION, LIVE_EVAL_CLIENT,
     STATS_CACHE_SECONDS, STATS_MAX_ROUTING_EVENTS, STATS_EVAL_HISTORY_DAYS,
 )
-from src.core.utils import create_llm
+from src.core.utils import EmptyAnswerError, create_llm, rate_limit_retry_after
 from src.core.vectorstore import create_or_get_vectorstore
 from src.core.rag_agent import AnswerResult, Passage, setup_router, answer_question
 from src.core.mcp_server import mcp
@@ -121,6 +121,20 @@ def record_routing_event(result: AnswerResult, client: str | None) -> None:
     except Exception as e:
         logger.warning(f"[Events] Routing event not stored: {e}")
 
+def answer_error(e: Exception, action: str) -> HTTPException:
+    """The HTTP error for a failed answer: 503 with Retry-After when the LLM's rate limit outlasted the SDK's
+    retries, 502 when the LLM answered blank twice, 500 for anything else."""
+    retry_after = rate_limit_retry_after(e)
+    if retry_after is not None:
+        logger.warning(f"[LLM] Rate limit reached while {action}; the client is asked to retry in {retry_after} s")
+        return HTTPException(status_code=503, headers={"Retry-After": str(retry_after)},
+                             detail=f"The language model's rate limit was reached; try again in {retry_after} s")
+    if isinstance(e, EmptyAnswerError):
+        logger.warning(f"[LLM] Empty answer twice while {action}")
+        return HTTPException(status_code=502, detail="The model returned an empty answer; ask again")
+    logger.error(f"Error {action}: {e}", exc_info=True)
+    return HTTPException(status_code=500, detail="Internal server error processing query")
+
 @app.post("/query", response_model = QueryResponse)
 def query_rag(request: QueryRequest, background_tasks: BackgroundTasks,
               x_rag_client: str | None = Header(default=None, include_in_schema=False)):
@@ -132,8 +146,7 @@ def query_rag(request: QueryRequest, background_tasks: BackgroundTasks,
         background_tasks.add_task(record_routing_event, result, x_rag_client)
         return QueryResponse(question=request.question, **asdict(result))
     except Exception as e:
-        logger.error(f"Error processing query: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Internal server error processing query")
+        raise answer_error(e, "processing query")
 
 class DemoUploadResponse(BaseModel):
     doc_id: str
@@ -192,8 +205,7 @@ def query_demo_document(doc_id: str, request: DemoQueryRequest):
     except Exception as e:
         if demo_store.get(doc_id) is None:  # evicted while answering
             raise not_found
-        logger.error(f"Error answering demo query: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Internal server error processing query")
+        raise answer_error(e, "answering demo query")
     return DemoQueryResponse(question=request.question, **result)
 
 

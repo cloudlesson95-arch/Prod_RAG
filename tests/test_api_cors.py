@@ -30,3 +30,17 @@ def test_error_responses_carry_cors_headers_and_expose_retry_after():
     assert response.status_code == 400
     assert response.headers["access-control-allow-origin"] == ALLOWED
     assert "retry-after" in response.headers["access-control-expose-headers"].lower()
+
+
+def test_a_rate_limit_response_reaches_the_frontend_with_retry_after(monkeypatch, rate_limit_error):
+    """Verify the 503 for a rate limit names the frontend's origin and lets its JavaScript read the Retry-After value."""
+    def rate_limited(*args, **kwargs):
+        raise rate_limit_error
+
+    monkeypatch.setattr(api, "answer_question", rate_limited)
+    response = TestClient(api.app).post("/query", json={"question": "Hi?"}, headers={"Origin": ALLOWED})
+
+    assert response.status_code == 503
+    assert response.headers["access-control-allow-origin"] == ALLOWED
+    assert response.headers["Retry-After"] == "7"
+    assert "retry-after" in response.headers["access-control-expose-headers"].lower()
