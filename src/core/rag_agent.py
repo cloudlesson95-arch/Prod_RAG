@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pydantic import BaseModel, Field
 from typing import Literal
 from src.config import (
@@ -45,13 +45,28 @@ class Passage:
 class AnswerResult:
     """An answer and how it was produced: what /query returns, and what the query CLI and the evaluator read."""
     answer: str
-    source: str | None = None                # source searched; "none" when the router chose no retrieval; None on a cache hit
+    source: str | None = None                # source searched; "none" when the router chose no retrieval; None on a hit of an answer cached without details
     route_reason: str | None = None          # RouteResult.reason, or "llm" with ROUTING_METHOD=llm
     router_confidence: float | None = None   # the classifier's raw probability for its own vote (uncalibrated)
     probe_similarity: float | None = None    # cosine similarity of the closest chunk in the corpus
     groundedness_score: float | None = None  # answer-context similarity: the best passage's similarity to the answer
     cache_hit: bool = False
     passages: list[Passage] = field(default_factory=list)
+
+
+def cache_details(result: AnswerResult) -> dict:
+    """What a semantic cache entry keeps besides the answer, so a hit can show the original route, scores and passages."""
+    details = asdict(result)
+    del details["answer"], details["cache_hit"]
+    return details
+
+
+def cached_result(entry: dict) -> AnswerResult:
+    """The result for a semantic cache hit: the stored answer and the details of the answer it came from.
+    An entry cached without details (before they were stored) gives the answer alone."""
+    details = dict(entry.get("details") or {})
+    passages = [Passage(**passage) for passage in details.pop("passages", [])]
+    return AnswerResult(answer=entry["answer"], cache_hit=True, passages=passages, **details)
 
 def setup_router():
     """Setup the router LLM for determining data sources.
@@ -143,7 +158,8 @@ def score_passages(passages: list[Passage], answer: str, embeddings) -> float:
     return max(scores)
 
 
-def answer_question(question: str, router, vectorstore, answer_llm, max_retries: int = MAX_RETRIES) -> AnswerResult:
+def answer_question(question: str, router, vectorstore, answer_llm, max_retries: int = MAX_RETRIES,
+                    use_cache: bool = True) -> AnswerResult:
     """Answer a user question using RAG with self-correction.
     
     Args:
@@ -152,16 +168,18 @@ def answer_question(question: str, router, vectorstore, answer_llm, max_retries:
         vectorstore: The vector store for retrieval.
         answer_llm: The LLM for generating answers.
         max_retries: Maximum number of rephrasing attempts (default: from config).
-        
+        use_cache: False neither reads nor fills the semantic cache (live-eval's requests, which measure the pipeline).
+
     Returns:
         AnswerResult: The answer, the routing decision behind it, and the passages it was generated from.
     """
-    if ENABLE_SEMANTIC_CACHE:
+    use_cache = use_cache and ENABLE_SEMANTIC_CACHE
+    if use_cache:
         query_vec = vectorstore._embedding_function.embed_query(question)
-        hit, cached_answer, sim = check_cache(query_vec)
-        if hit:
+        entry, sim = check_cache(query_vec)
+        if entry is not None:
             logger.info(f"[Semantic Cache]: HIT (similarity {sim:.3f}) — skipping retrieval & LLM generation.")
-            return AnswerResult(answer=cached_answer, cache_hit=True)
+            return cached_result(entry)
         logger.info(f"[Semantic Cache]: MISS (highest similarity {sim:.3f})")
 
     source_filter = "none"
@@ -222,14 +240,16 @@ def answer_question(question: str, router, vectorstore, answer_llm, max_retries:
         else:
             logger.info(f"[Groundedness]: Score: {g_score:.3f}")
 
-    if ENABLE_SEMANTIC_CACHE:
+    result = AnswerResult(answer=answer, source=source_filter, route_reason=route_reason,
+                          router_confidence=router_confidence, probe_similarity=probe_similarity,
+                          groundedness_score=g_score, passages=passages)
+
+    if use_cache:
         if not answer.strip():
             logger.warning("[Semantic Cache]: Skipping caching for an empty answer.")
         elif "I don't know" in answer:
              logger.info("[Semantic Cache]: Skipping caching for 'I don't know' answer.")
         else:
-            add_to_cache(question, query_vec, answer)
+            add_to_cache(question, query_vec, answer, cache_details(result))
 
-    return AnswerResult(answer=answer, source=source_filter, route_reason=route_reason,
-                        router_confidence=router_confidence, probe_similarity=probe_similarity,
-                        groundedness_score=g_score, passages=passages)
+    return result

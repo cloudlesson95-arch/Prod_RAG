@@ -83,7 +83,8 @@ class QueryRequest(BaseModel):
 class QueryResponse(BaseModel):
     question: str
     answer: str
-    source: str | None = Field(None, description='Source searched; "none" when answered without retrieval; null on a cache hit')
+    source: str | None = Field(None, description='Source searched; "none" when answered without retrieval; null on a '
+                                                 'hit of an answer cached without details')
     route_reason: str | None = Field(None, description="classifier, probe, version, floor, no_retrieval or llm")
     router_confidence: float | None = Field(None, description="The classifier's probability for its own vote (uncalibrated)")
     probe_similarity: float | None = Field(None, description="Cosine similarity of the closest chunk in the corpus")
@@ -142,7 +143,9 @@ def query_rag(request: QueryRequest, background_tasks: BackgroundTasks,
         raise HTTPException(status_code = 400, detail="Question cannot be empty")
 
     try:
-        result = answer_question(request.question, router, vectorstore, answer_llm)
+        # live-eval measures the pipeline: its questions neither read nor fill the semantic cache
+        result = answer_question(request.question, router, vectorstore, answer_llm,
+                                 use_cache=x_rag_client != LIVE_EVAL_CLIENT)
         background_tasks.add_task(record_routing_event, result, x_rag_client)
         return QueryResponse(question=request.question, **asdict(result))
     except Exception as e:

@@ -33,7 +33,7 @@ def test_query_returns_the_answer_with_its_route_and_passages(monkeypatch):
     result = AnswerResult(answer="A clowder.", source="cat-facts.txt", route_reason="classifier",
                           router_confidence=0.9, probe_similarity=0.62, groundedness_score=0.71,
                           passages=[Passage("cat-facts.txt", "A group of cats is called a clowder.", 0.71)])
-    monkeypatch.setattr(api, "answer_question", lambda question, router, vectorstore, llm: result)
+    monkeypatch.setattr(api, "answer_question", lambda question, router, vectorstore, llm, **kwargs: result)
 
     response = TestClient(api.app).post("/query", json={"question": "What is a group of cats called?"})
 
@@ -50,7 +50,7 @@ def test_query_records_its_routing_decision_without_the_question(monkeypatch, fa
     """Verify each answered /query stores one routing event, marks live-eval's requests and never stores the question."""
     monkeypatch.setattr(api, "event_store", fake_event_store)
     monkeypatch.setattr(api, "APP_REVISION", "abc1234")
-    monkeypatch.setattr(api, "answer_question", lambda question, router, vectorstore, llm: AnswerResult(
+    monkeypatch.setattr(api, "answer_question", lambda question, router, vectorstore, llm, **kwargs: AnswerResult(
         answer="A clowder.", source="cat-facts.txt", route_reason="classifier", router_confidence=0.9,
         probe_similarity=0.62, groundedness_score=0.71))
     client = TestClient(api.app)
@@ -70,12 +70,25 @@ def test_a_failing_event_store_does_not_fail_the_query(monkeypatch, fake_event_s
     """Verify the answer still arrives when the routing event can't be stored."""
     fake_event_store.fail = True
     monkeypatch.setattr(api, "event_store", fake_event_store)
-    monkeypatch.setattr(api, "answer_question", lambda question, router, vectorstore, llm: AnswerResult(answer="A clowder."))
+    monkeypatch.setattr(api, "answer_question", lambda question, router, vectorstore, llm, **kwargs: AnswerResult(answer="A clowder."))
 
     response = TestClient(api.app).post("/query", json={"question": "What is a group of cats called?"})
 
     assert response.status_code == 200
     assert response.json()["answer"] == "A clowder."
+
+
+def test_live_eval_requests_skip_the_semantic_cache(monkeypatch):
+    """Verify users' questions use the semantic cache and live-eval's don't."""
+    use_cache = []
+    monkeypatch.setattr(api, "answer_question", lambda question, router, vectorstore, llm, **kwargs:
+                        use_cache.append(kwargs["use_cache"]) or AnswerResult(answer="A clowder."))
+    client = TestClient(api.app)
+
+    client.post("/query", json={"question": "What is a group of cats called?"})
+    client.post("/query", json={"question": "What is a group of cats called?"}, headers={"X-RAG-Client": "live-eval"})
+
+    assert use_cache == [True, False]
 
 
 def test_a_rate_limit_answers_503_with_retry_after(monkeypatch, fake_event_store, rate_limit_error):

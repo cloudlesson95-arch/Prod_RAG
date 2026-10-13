@@ -156,11 +156,14 @@ jobs:
           echo "::error::The app never reported snapshot $EXPECTED"
           exit 1
 
-      # /health doesn't load the router models, so only /query proves the new snapshot works
+      # /health doesn't load the router models, so only /query proves the new snapshot works.
+      # Marked as live-eval: its answer stays out of the semantic cache the gate below reads, and out of the users'
+      # routing stats.
       - name: Smoke-test /query
         if: steps.ingest.outputs.published == 'true'
         run: |
           curl -sf --max-time 300 -X POST "$APP_URL/query" -H 'Content-Type: application/json' \
+            -H 'X-RAG-Client: live-eval' \
             -d '{"question": "What is a group of cats called?"}' | jq -e '.answer | length > 0'
 
       - name: Live evaluation gate

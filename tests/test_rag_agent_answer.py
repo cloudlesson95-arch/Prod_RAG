@@ -1,3 +1,4 @@
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -64,14 +65,56 @@ def test_i_dont_know_keeps_the_passages_unscored(vectorstore):
 
 
 def test_cache_hit_returns_only_the_answer(vectorstore, monkeypatch):
-    """Verify a semantic cache hit skips routing and reports no route or passages."""
+    """Verify a hit of an entry cached without details (an older cache file) skips routing and reports no route or passages."""
     monkeypatch.setattr(rag_agent, "ENABLE_SEMANTIC_CACHE", True)
-    monkeypatch.setattr(rag_agent, "check_cache", lambda vec: (True, "A clowder.", 0.97))
+    monkeypatch.setattr(rag_agent, "check_cache", lambda vec: ({"answer": "A clowder.", "details": None}, 0.97))
     monkeypatch.setattr(router, "decide_route", lambda *args, **kwargs: pytest.fail("routed on a cache hit"))
 
     result = rag_agent.answer_question(QUESTION, None, vectorstore, FakeLLM("unused"))
 
     assert result == rag_agent.AnswerResult(answer="A clowder.", cache_hit=True)
+
+
+def test_cache_hit_returns_the_stored_details(vectorstore, monkeypatch):
+    """Verify a hit gives back the route, scores and passages of the answer it was cached from."""
+    monkeypatch.setattr(rag_agent, "ENABLE_SEMANTIC_CACHE", True)
+    entry = {"answer": "A clowder.", "details": {
+        "source": "cat-facts.txt", "route_reason": "classifier", "router_confidence": 0.9, "probe_similarity": 0.62,
+        "groundedness_score": 1.0,
+        "passages": [{"source": "cat-facts.txt", "text": "A group of cats is called a clowder.", "similarity": 1.0}]}}
+    monkeypatch.setattr(rag_agent, "check_cache", lambda vec: (entry, 0.97))
+    monkeypatch.setattr(router, "decide_route", lambda *args, **kwargs: pytest.fail("routed on a cache hit"))
+
+    result = rag_agent.answer_question(QUESTION, None, vectorstore, FakeLLM("unused"))
+
+    assert result == rag_agent.AnswerResult(
+        answer="A clowder.", source="cat-facts.txt", route_reason="classifier", router_confidence=0.9,
+        probe_similarity=0.62, groundedness_score=1.0, cache_hit=True,
+        passages=[rag_agent.Passage("cat-facts.txt", "A group of cats is called a clowder.", 1.0)])
+
+
+def test_eval_traffic_neither_reads_nor_fills_the_cache(vectorstore, monkeypatch):
+    """Verify use_cache=False answers through the pipeline without touching the semantic cache."""
+    monkeypatch.setattr(rag_agent, "ENABLE_SEMANTIC_CACHE", True)
+    monkeypatch.setattr(rag_agent, "check_cache", lambda vec: pytest.fail("read the cache"))
+    monkeypatch.setattr(rag_agent, "add_to_cache", lambda *args: pytest.fail("filled the cache"))
+
+    result = rag_agent.answer_question(QUESTION, None, vectorstore, FakeLLM("A clowder."), use_cache=False)
+
+    assert (result.answer, result.cache_hit) == ("A clowder.", False)
+
+
+def test_a_cached_answer_keeps_its_route_and_passages(vectorstore, monkeypatch):
+    """Verify what goes into the cache comes back as the same result, marked as a cache hit."""
+    monkeypatch.setattr(rag_agent, "ENABLE_SEMANTIC_CACHE", True)
+    monkeypatch.setattr(rag_agent, "check_cache", lambda vec: (None, 0.0))
+    stored = []
+    monkeypatch.setattr(rag_agent, "add_to_cache", lambda question, vec, answer, details: stored.append((answer, details)))
+
+    result = rag_agent.answer_question(QUESTION, None, vectorstore, FakeLLM("A clowder."))
+
+    [(answer, details)] = stored
+    assert rag_agent.cached_result({"answer": answer, "details": details}) == replace(result, cache_hit=True)
 
 
 def test_llm_routing_reports_its_source_without_classifier_scores(vectorstore, monkeypatch):
@@ -89,9 +132,9 @@ def test_llm_routing_reports_its_source_without_classifier_scores(vectorstore, m
 def test_only_non_empty_answers_are_cached(vectorstore, monkeypatch, reply, cached):
     """Verify a real answer is cached, while an empty LLM reply is returned without being cached."""
     monkeypatch.setattr(rag_agent, "ENABLE_SEMANTIC_CACHE", True)
-    monkeypatch.setattr(rag_agent, "check_cache", lambda vec: (False, None, 0.0))
+    monkeypatch.setattr(rag_agent, "check_cache", lambda vec: (None, 0.0))
     stored = []
-    monkeypatch.setattr(rag_agent, "add_to_cache", lambda question, vec, answer: stored.append(answer))
+    monkeypatch.setattr(rag_agent, "add_to_cache", lambda question, vec, answer, details: stored.append(answer))
 
     result = rag_agent.answer_question(QUESTION, None, vectorstore, FakeLLM(reply), max_retries=0)
 

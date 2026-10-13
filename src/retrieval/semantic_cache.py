@@ -31,11 +31,12 @@ def check_cache(query_embedding):
     """Check if query_embedding has a high similarity match in the cache.
     
     Returns:
-        tuple: (hit: bool, answer: str | None, max_similarity: float)
+        tuple: (the matching entry, or None on a miss; max_similarity: float). An entry holds "answer" and, if it was
+        cached with them, "details": the route, scores and passages of the answer it came from.
     """
     records  = load_cache()
     if not records:
-        return False, None, 0.0
+        return None, 0.0
 
     query_vec = np.array(query_embedding)
     best_match = None
@@ -49,17 +50,18 @@ def check_cache(query_embedding):
             best_match = record
             
     if max_sim >= CACHE_SIMILARITY_THRESHOLD and best_match is not None:
-        return True, best_match["answer"], max_sim
+        return best_match, max_sim
     else:
-        return False, None, max_sim
+        return None, max_sim
 
-def add_to_cache(query: str, query_embedding, answer: str):
-    """Add a new query-answer pair to the semantic cache."""
+def add_to_cache(query: str, query_embedding, answer: str, details: dict | None = None):
+    """Add a new query-answer pair to the semantic cache, with the details a hit shows again."""
     records = load_cache()
     entry = {
         "query": query,
-        "vector": query_embedding, 
+        "vector": query_embedding,
         "answer": answer,
+        "details": details,
         "timestamp": time.time()
     }
     records.append(entry)
