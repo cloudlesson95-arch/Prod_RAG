@@ -28,9 +28,10 @@ EVENTS_PREFIX = "events/"
 READ_WORKERS = 8  # parallel list and read calls; boto3's default pool holds 10 connections
 
 # Short timeouts and one quick retry: routing events are written on the /query path, where a slow store must not
-# hold up the answer (the caller treats a failed write as a warning). Azure Storage's default retry policy waits
-# about 15 s before its first retry, so it gets a linear backoff of about 1 s instead.
-S3_CLIENT_CONFIG = Config(connect_timeout=3, read_timeout=5, retries={"max_attempts": 2, "mode": "standard"})
+# hold up the answer (the caller treats a failed write as a warning). On Lambda the write happens before the response
+# is sent, so S3 gets 1 s to connect, 2 s to answer and 2 attempts in total: at most about 7 s. Azure Storage's
+# default retry policy waits about 15 s before its first retry, so it gets a linear backoff of about 1 s instead.
+S3_CLIENT_CONFIG = Config(connect_timeout=1, read_timeout=2, retries={"total_max_attempts": 2, "mode": "standard"})
 AZURE_CLIENT_OPTIONS = {"connection_timeout": 3, "read_timeout": 5,
                         "retry_policy": LinearRetry(backoff=1, random_jitter_range=1, retry_total=1)}
 

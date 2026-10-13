@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 from src.logging_config import setup_logging
 from src.config import (
     MAIN_LLM_MODEL, DEMO_MAX_FILE_BYTES, DEMO_MAX_TEXT_CHARS, DEMO_TTL_SECONDS, DEMO_RATE_LIMIT_PER_MINUTE,
-    CORS_ALLOW_ORIGINS, APP_REVISION, LIVE_EVAL_CLIENT,
+    CORS_ALLOW_ORIGINS, APP_REVISION, LIVE_EVAL_CLIENT, ON_AWS_LAMBDA,
     STATS_CACHE_SECONDS, STATS_MAX_ROUTING_EVENTS, STATS_EVAL_HISTORY_DAYS,
 )
 from src.core.utils import EmptyAnswerError, create_llm, rate_limit_retry_after
@@ -104,7 +104,8 @@ def health_check():
     }
 
 def record_routing_event(result: AnswerResult, client: str | None) -> None:
-    """Store one /query decision for the dashboard's routing stats. Runs after the response is sent; never fails it.
+    """Store one /query decision for the dashboard's routing stats. Runs after the response is sent (before it, on
+    Lambda); never fails it.
 
     No question text: these are public users' inputs. live-eval marks its requests, so the stats can leave them out.
     """
@@ -121,6 +122,14 @@ def record_routing_event(result: AnswerResult, client: str | None) -> None:
         })
     except Exception as e:
         logger.warning(f"[Events] Routing event not stored: {e}")
+
+def store_routing_event(result: AnswerResult, client: str | None, background_tasks: BackgroundTasks) -> None:
+    """Write the routing event now on AWS Lambda (a background write would wait for the next request, see
+    ON_AWS_LAMBDA), and after the response everywhere else."""
+    if ON_AWS_LAMBDA:
+        record_routing_event(result, client)
+    else:
+        background_tasks.add_task(record_routing_event, result, client)
 
 def answer_error(e: Exception, action: str) -> HTTPException:
     """The HTTP error for a failed answer: 503 with Retry-After when the LLM's rate limit outlasted the SDK's
@@ -146,7 +155,7 @@ def query_rag(request: QueryRequest, background_tasks: BackgroundTasks,
         # live-eval measures the pipeline: its questions neither read nor fill the semantic cache
         result = answer_question(request.question, router, vectorstore, answer_llm,
                                  use_cache=x_rag_client != LIVE_EVAL_CLIENT)
-        background_tasks.add_task(record_routing_event, result, x_rag_client)
+        store_routing_event(result, x_rag_client, background_tasks)
         return QueryResponse(question=request.question, **asdict(result))
     except Exception as e:
         raise answer_error(e, "processing query")

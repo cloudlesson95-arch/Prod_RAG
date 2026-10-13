@@ -123,6 +123,9 @@ CORS_ALLOW_ORIGINS = [origin.rstrip("/") for origin in os.getenv("CORS_ALLOW_ORI
 APP_REVISION = os.getenv("APP_REVISION", "")
 # X-RAG-Client header value that marks live-eval's /query requests, so the routing stats can leave them out
 LIVE_EVAL_CLIENT = "live-eval"
+# Set by the AWS Lambda runtime. Lambda freezes the environment as soon as a response is sent, so work left for after
+# the response (FastAPI background tasks) runs only when the next request thaws it: minutes later, or never.
+ON_AWS_LAMBDA = bool(os.getenv("AWS_LAMBDA_FUNCTION_NAME"))
 
 # Demo sandbox: public single-document Q&A, held in memory per instance and never persisted
 DEMO_MAX_FILE_BYTES = 2 * 1024 * 1024

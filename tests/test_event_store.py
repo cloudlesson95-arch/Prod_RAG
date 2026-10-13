@@ -62,6 +62,14 @@ def test_s3_store_contract(moto_bucket):
     check_event_store_contract(S3EventStore(moto_bucket, "us-east-1"))
 
 
+def test_s3_event_writes_give_up_within_seconds(moto_bucket):
+    """Verify the S3 client allows 2 attempts in total of 1 s to connect and 2 s to answer: on Lambda the routing
+    event is written before the response, which may wait at most about 7 s for it."""
+    config = S3EventStore(moto_bucket, "us-east-1")._s3.meta.config
+
+    assert (config.connect_timeout, config.read_timeout, config.retries["total_max_attempts"]) == (1, 2, 2)
+
+
 @needs_azurite
 def test_azure_blob_store_contract(azurite_container):
     """Verify the Azure backend honors the same contract as the local one."""

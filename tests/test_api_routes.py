@@ -1,3 +1,4 @@
+from fastapi import BackgroundTasks
 from fastapi.testclient import TestClient
 from starlette.routing import Mount
 
@@ -76,6 +77,28 @@ def test_a_failing_event_store_does_not_fail_the_query(monkeypatch, fake_event_s
 
     assert response.status_code == 200
     assert response.json()["answer"] == "A clowder."
+
+
+def test_on_lambda_the_routing_event_is_stored_before_the_response(monkeypatch, fake_event_store):
+    """Verify that on Lambda the event is written at once: a background task would wait for the next request."""
+    monkeypatch.setattr(api, "event_store", fake_event_store)
+    monkeypatch.setattr(api, "ON_AWS_LAMBDA", True)
+    background_tasks = BackgroundTasks()
+
+    api.store_routing_event(AnswerResult(answer="A clowder."), None, background_tasks)
+
+    assert (len(fake_event_store.records), background_tasks.tasks) == (1, [])
+
+
+def test_elsewhere_the_routing_event_waits_for_the_response(monkeypatch, fake_event_store):
+    """Verify that off Lambda the event is left to a background task, which runs after the response is sent."""
+    monkeypatch.setattr(api, "event_store", fake_event_store)
+    monkeypatch.setattr(api, "ON_AWS_LAMBDA", False)
+    background_tasks = BackgroundTasks()
+
+    api.store_routing_event(AnswerResult(answer="A clowder."), None, background_tasks)
+
+    assert (fake_event_store.records, len(background_tasks.tasks)) == ([], 1)
 
 
 def test_live_eval_requests_skip_the_semantic_cache(monkeypatch):
