@@ -6,7 +6,7 @@ from src.config import (
     ROUTING_METHOD, ENABLE_SEMANTIC_CACHE, ENABLE_HYBRID_SEARCH, ENABLE_RERANKER,
     ENABLE_MULTI_HOP, GROUNDEDNESS_THRESHOLD
 )
-from src.core.utils import create_llm
+from src.core.utils import create_llm, invoke_text
 from src.monitoring.groundedness import chunk_similarities
 from src.retrieval.semantic_cache import check_cache, add_to_cache
 from src.retrieval.hybrid_search import hybrid_retrieve
@@ -129,7 +129,7 @@ def retrieve_and_answer(query: str, source_filter: str, vectorstore, answer_llm)
 
     Question: {query}
     Answer:"""
-    return answer_llm.invoke(prompt).content, results
+    return invoke_text(answer_llm, prompt), results
 
 
 def score_passages(passages: list[Passage], answer: str, embeddings) -> float:
@@ -177,7 +177,7 @@ def answer_question(question: str, router, vectorstore, answer_llm, max_retries:
         route_reason, router_confidence, probe_similarity = route.reason, route.confidence, route.probe_similarity
 
         if not route.needs_retrieval:
-            answer = answer_llm.invoke(question).content
+            answer = invoke_text(answer_llm, question)
         else:
             source_filter = route.source
             answer, docs = retrieve_and_answer(question, source_filter, vectorstore, answer_llm)
@@ -189,7 +189,7 @@ def answer_question(question: str, router, vectorstore, answer_llm, max_retries:
 
         if decision.source == "none":
             logger.info("[Router] No retrieval needed")
-            answer = answer_llm.invoke(question).content
+            answer = invoke_text(answer_llm, question)
         else:
             source_filter = decision.source
             answer, docs = retrieve_and_answer(question, source_filter, vectorstore, answer_llm)
@@ -206,7 +206,7 @@ def answer_question(question: str, router, vectorstore, answer_llm, max_retries:
             Rephrase this question using different keywords.
             Return ONLY the rephrased question."""
 
-            current_query = answer_llm.invoke(rephrase_prompt).content.strip()
+            current_query = invoke_text(answer_llm, rephrase_prompt).strip()
             logger.info(f"[Agent] Rephrased query: '{current_query}'")
 
             answer, docs = retrieve_and_answer(current_query, source_filter, vectorstore, answer_llm)

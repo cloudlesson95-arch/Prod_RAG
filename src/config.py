@@ -18,6 +18,10 @@ EMBEDDING_MODEL = "models/gemini-embedding-001"
 EMBEDDING_LOCAL_MODEL = "all-MiniLM-L6-v2"
 MAIN_LLM_MODEL = "groq" # or gemini
 EVAL_LLM_MODEL = "groq" # or gemini
+# The Groq SDK retries a rate limit (429) or server error this many times, waiting for Groq's retry-after header
+# between attempts when it's 60 s or less (0.5-8 s otherwise). Every wait counts against the caller's timeout
+# (live-eval's requests: 60 s).
+GROQ_MAX_RETRIES = 2
 
 # Database & Runtime Storage paths
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

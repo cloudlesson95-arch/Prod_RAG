@@ -1,6 +1,7 @@
 from typing import Literal, List, Any, Callable
 from pydantic import BaseModel, Field
 from src.config import MAX_HOPS
+from src.core.utils import invoke_text
 from src.logging_config import setup_logging
 
 logger = setup_logging(__name__)
@@ -105,4 +106,4 @@ Context:
 Question: {question}
 Answer:"""
 
-    return answer_llm.invoke(prompt).content, context_docs
+    return invoke_text(answer_llm, prompt), context_docs

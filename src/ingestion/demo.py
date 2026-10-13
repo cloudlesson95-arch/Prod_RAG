@@ -9,6 +9,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from src.config import CHUNK_SIZE, CHUNK_OVERLAP, DEMO_TTL_SECONDS, DEMO_MAX_DOCS
 from src.core.rag_agent import Passage, retrieve_chunks, score_passages
+from src.core.utils import invoke_text
 from src.logging_config import setup_logging
 
 logger = setup_logging(__name__)
@@ -108,7 +109,7 @@ def answer_from_document(doc: DemoDocument, question: str, answer_llm) -> dict:
     """
     results = retrieve_chunks(question, "none", doc.vectorstore)
     context_text = "\n---\n".join(d.page_content for d in results)
-    answer = answer_llm.invoke(DEMO_ANSWER_PROMPT.format(context=context_text, question=question)).content
+    answer = invoke_text(answer_llm, DEMO_ANSWER_PROMPT.format(context=context_text, question=question))
 
     passages = [Passage(d.metadata.get("source", doc.filename), d.page_content) for d in results]
     groundedness = None
