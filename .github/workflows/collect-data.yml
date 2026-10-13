@@ -140,13 +140,19 @@ jobs:
             aws lambda wait function-updated --function-name ragprod-api
           fi
 
+      # Then the routing self-test on that snapshot must have passed: it loads the router models the batch retrained
       - name: Wait for the new snapshot
         if: steps.ingest.outputs.published == 'true'
         run: |
           EXPECTED=$(jq -r .state_version result.json)
           for _ in $(seq 1 60); do
-            CURRENT=$(curl -s --max-time 30 "$APP_URL/health" | jq -r .state_version 2>/dev/null || true)
+            HEALTH=$(curl -s --max-time 30 "$APP_URL/health" || true)
+            CURRENT=$(echo "$HEALTH" | jq -r .state_version 2>/dev/null || true)
             if [ "$CURRENT" = "$EXPECTED" ]; then
+              if [ "$(echo "$HEALTH" | jq -r .routing_ok)" = "false" ]; then
+                echo "::error::The app serves snapshot $CURRENT, but its routing self-test failed (/health: routing_ok=false); the app's startup logs say why"
+                exit 1
+              fi
               echo "The app serves snapshot $CURRENT"
               exit 0
             fi
@@ -156,7 +162,7 @@ jobs:
           echo "::error::The app never reported snapshot $EXPECTED"
           exit 1
 
-      # /health doesn't load the router models, so only /query proves the new snapshot works.
+      # /health's routing_ok covers the router models; /query also proves the LLM answers.
       # Marked as live-eval: its answer stays out of the semantic cache the gate below reads, and out of the users'
       # routing stats.
       - name: Smoke-test /query

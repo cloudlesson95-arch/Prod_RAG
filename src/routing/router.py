@@ -1,3 +1,4 @@
+import time
 from dataclasses import dataclass
 
 from src.config import CORPUS_PROBE_FLOOR, CORPUS_PROBE_FLOOR_MAX_CONFIDENCE, CORPUS_PROBE_THRESHOLD
@@ -58,3 +59,24 @@ def decide_route(query_embedding, vectorstore, query: str = "") -> RouteResult:
     source = probe_source or "none"  # "none" searches every source; only reachable with an empty index
     logger.info(f"[Classical Router]: Selected source '{source}' (closest chunk at {probe_similarity:.2f})")
     return RouteResult(True, source, confidence, probe_similarity, reason)
+
+
+SELF_TEST_QUESTION = "What is a group of cats called?"  # cat-facts.txt is part of every corpus
+
+
+def routing_self_test(vectorstore) -> bool:
+    """Make one routing decision at startup, so a router that can't route shows up in /health instead of as 500s on
+    /query (Phase 6: a classifier pickled with other library versions loaded, then failed at predict time).
+
+    Checks that routing runs, not which route it picks. It also builds the probe's chunk matrix, which the first
+    question would otherwise build.
+    """
+    started = time.perf_counter()
+    try:
+        embedding = vectorstore._embedding_function.embed_query(SELF_TEST_QUESTION)
+        route = decide_route(embedding, vectorstore, query=SELF_TEST_QUESTION)
+    except Exception as e:
+        logger.error(f"[Routing self-test] FAILED, so /query will answer 500: {e!r}", exc_info=True)
+        return False
+    logger.info(f"[Routing self-test] OK in {time.perf_counter() - started:.1f} s ('{route.source}', {route.reason})")
+    return True

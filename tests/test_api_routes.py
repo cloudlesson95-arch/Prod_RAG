@@ -152,3 +152,15 @@ def test_health_reports_the_deployed_revision(monkeypatch):
     assert TestClient(api.app).get("/health").json()["revision"] == "abc1234"
     monkeypatch.setattr(api, "APP_REVISION", "")
     assert TestClient(api.app).get("/health").json()["revision"] is None
+
+
+def test_health_reports_a_failed_routing_self_test(monkeypatch):
+    """Verify /health stays 200 but says "degraded" when the router failed its startup self-test."""
+    monkeypatch.setattr(api, "routing_ok", False)
+    response = TestClient(api.app).get("/health")
+    assert response.status_code == 200
+    assert (response.json()["status"], response.json()["routing_ok"]) == ("degraded", False)
+
+    monkeypatch.setattr(api, "routing_ok", True)
+    body = TestClient(api.app).get("/health").json()
+    assert (body["status"], body["routing_ok"]) == ("ok", True)

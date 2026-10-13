@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 
 from src.logging_config import setup_logging
 from src.config import (
-    MAIN_LLM_MODEL, DEMO_MAX_FILE_BYTES, DEMO_MAX_TEXT_CHARS, DEMO_TTL_SECONDS, DEMO_RATE_LIMIT_PER_MINUTE,
+    MAIN_LLM_MODEL, ROUTING_METHOD, DEMO_MAX_FILE_BYTES, DEMO_MAX_TEXT_CHARS, DEMO_TTL_SECONDS, DEMO_RATE_LIMIT_PER_MINUTE,
     CORS_ALLOW_ORIGINS, APP_REVISION, LIVE_EVAL_CLIENT, ON_AWS_LAMBDA,
     STATS_CACHE_SECONDS, STATS_MAX_ROUTING_EVENTS, STATS_EVAL_HISTORY_DAYS,
 )
@@ -21,6 +21,7 @@ from src.core.mcp_server import mcp
 from src.monitoring.telemetry import configure_telemetry
 from src.monitoring.stats import corpus_stats, routing_stats
 from src.routing.classifier import training_source_mix
+from src.routing.router import routing_self_test
 from src.storage.state_sync import initialize_state, read_local_version, read_only_reason
 from src.storage.event_store import get_event_store
 from src.storage.doc_registry import get_registered_documents
@@ -41,16 +42,19 @@ vectorstore = None
 answer_llm = None
 demo_store = None
 event_store = None
+routing_ok = None  # the startup routing self-test's result; None when it didn't run
 demo_upload_limiter = RateLimiter(DEMO_RATE_LIMIT_PER_MINUTE)
 
 
 def startup_event():
-    global router, vectorstore, answer_llm, demo_store, event_store
+    global router, vectorstore, answer_llm, demo_store, event_store, routing_ok
     logger.info("Initializing RAG components for API...")
     initialize_state()  # must run before anything opens Chroma
     event_store = get_event_store()  # next to the state store: routing events for the dashboard
     router = setup_router()
     vectorstore = create_or_get_vectorstore()
+    # Classical routing only: with ROUTING_METHOD=llm the test would spend an LLM call
+    routing_ok = routing_self_test(vectorstore) if ROUTING_METHOD == "classical" else None
     demo_store = DemoStore(vectorstore.embeddings)  # reuses the loaded embedding model
     answer_llm = create_llm(MAIN_LLM_MODEL)
     logger.info("RAG components initialized successfully.")
@@ -95,12 +99,15 @@ class QueryResponse(BaseModel):
 
 @app.get("/health")
 def health_check():
+    """Always 200. "degraded" means the router failed its startup self-test, so /query answers 500 (the app's logs
+    say why); the deploy and collect-data workflows check routing_ok."""
     return {
-        "status": "ok",
+        "status": "degraded" if routing_ok is False else "ok",
         "model": MAIN_LLM_MODEL,
         "revision": APP_REVISION or None,
         "state_version": read_local_version(),
         "read_only": read_only_reason() is not None,
+        "routing_ok": routing_ok,
     }
 
 def record_routing_event(result: AnswerResult, client: str | None) -> None:

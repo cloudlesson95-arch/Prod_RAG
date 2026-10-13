@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import pytest
 
 from src.retrieval import versions
@@ -64,3 +66,20 @@ def test_sure_vote_is_not_floored(votes):
     votes["classifier"], votes["probe"] = (True, 0.75), ("fictional_text.txt", 0.40)
     route = router.decide_route([1.0, 0.0], vectorstore=None)
     assert route == router.RouteResult(True, "fictional_text.txt", 0.75, 0.40, "classifier")
+
+
+SELF_TEST_STORE = SimpleNamespace(_embedding_function=SimpleNamespace(embed_query=lambda text: [1.0, 0.0]))
+
+
+def test_self_test_passes_when_routing_runs(votes):
+    """Verify the startup self-test reports True when a routing decision can be made."""
+    assert router.routing_self_test(SELF_TEST_STORE) is True
+
+
+def test_self_test_fails_when_the_classifier_cannot_predict(votes, monkeypatch):
+    """Verify Phase 6's failure (a classifier pickle that loads but can't predict) makes the self-test report False."""
+    def unloadable(embedding):
+        raise AttributeError("'LogisticRegression' object has no attribute 'multi_class'")
+
+    monkeypatch.setattr(classifier, "predict_needs_retrieval_with_confidence", unloadable)
+    assert router.routing_self_test(SELF_TEST_STORE) is False

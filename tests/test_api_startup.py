@@ -16,12 +16,14 @@ def startup_calls(monkeypatch):
         return SimpleNamespace(embeddings="loaded-embeddings")
 
     # startup_event rebinds these globals; registering them with monkeypatch restores the originals after the test
-    for name in ("router", "vectorstore", "answer_llm", "demo_store", "event_store"):
+    for name in ("router", "vectorstore", "answer_llm", "demo_store", "event_store", "routing_ok"):
         monkeypatch.setattr(api, name, None)
+    monkeypatch.setattr(api, "ROUTING_METHOD", "classical")
     monkeypatch.setattr(api, "initialize_state", lambda: calls.append("state"))
     monkeypatch.setattr(api, "get_event_store", lambda: calls.append("events"))
     monkeypatch.setattr(api, "setup_router", lambda: calls.append("router"))
     monkeypatch.setattr(api, "create_or_get_vectorstore", fake_vectorstore)
+    monkeypatch.setattr(api, "routing_self_test", lambda vectorstore: calls.append("self-test") or True)
     monkeypatch.setattr(api, "create_llm", lambda model: calls.append("llm"))
 
     api.startup_event()
@@ -38,3 +40,9 @@ def test_startup_creates_demo_store_with_loaded_embeddings(startup_calls):
     """Verify the demo store is published as a module global and reuses the startup embedding model."""
     assert isinstance(api.demo_store, DemoStore)
     assert api.demo_store._embeddings == "loaded-embeddings"
+
+
+def test_startup_runs_the_routing_self_test_after_opening_chroma(startup_calls):
+    """Verify the routing self-test runs on the opened vector store and its result reaches /health."""
+    assert startup_calls.index("self-test") > startup_calls.index("vectorstore")
+    assert api.routing_ok is True

@@ -120,17 +120,24 @@ jobs:
             echo "AZURE_STORAGE_ACCOUNT_URL=$ACCOUNT_URL"
           } >> "$GITHUB_ENV"
 
+      # The pushed revision itself: until it's ready, the old revision keeps answering /health. Then its routing
+      # self-test must have passed, or every /query would answer 500.
       - name: Wait for Azure Container App Warmup
         run: |
-          echo "Polling ${{ vars.DEPLOYED_APP_URL }}/health..."
+          echo "Polling ${{ vars.DEPLOYED_APP_URL }}/health for revision ${{ github.sha }}..."
           for _ in {1..30}; do
-            HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${{ vars.DEPLOYED_APP_URL }}/health" || true)
-            if [ "$HTTP_STATUS" -eq 200 ]; then
-              echo "Azure Container App is ready!"
+            HEALTH=$(curl -s "${{ vars.DEPLOYED_APP_URL }}/health" || true)
+            if [ "$(echo "$HEALTH" | jq -r .revision 2>/dev/null)" = "${{ github.sha }}" ]; then
+              if [ "$(echo "$HEALTH" | jq -r .routing_ok)" = "false" ]; then
+                echo "::error::The new revision's routing self-test failed (/health: routing_ok=false), so /query would answer 500; the app's startup logs say why"
+                exit 1
+              fi
+              echo "Azure Container App is ready: $HEALTH"
               exit 0
             fi
             sleep 10
           done
+          echo "::error::/health never reported revision ${{ github.sha }}"
           exit 1
 
       - name: Run Live Evaluation Gate
@@ -278,17 +285,23 @@ jobs:
           CLEAN_URL=$(echo "$URL_CONFIG" | sed 's/\/$//')
           echo "DEPLOYED_AWS_URL=$CLEAN_URL" >> "$GITHUB_ENV"
 
+      # The pushed revision itself, and its routing self-test must have passed, or every /query would answer 500
       - name: Wait for AWS Lambda Warmup
         run: |
-          echo "Polling $DEPLOYED_AWS_URL/health..."
+          echo "Polling $DEPLOYED_AWS_URL/health for revision ${{ github.sha }}..."
           for _ in {1..30}; do
-            HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$DEPLOYED_AWS_URL/health" || true)
-            if [ "$HTTP_STATUS" -eq 200 ]; then
-              echo "AWS Lambda API is ready!"
+            HEALTH=$(curl -s "$DEPLOYED_AWS_URL/health" || true)
+            if [ "$(echo "$HEALTH" | jq -r .revision 2>/dev/null)" = "${{ github.sha }}" ]; then
+              if [ "$(echo "$HEALTH" | jq -r .routing_ok)" = "false" ]; then
+                echo "::error::The new version's routing self-test failed (/health: routing_ok=false), so /query would answer 500; the Lambda logs say why"
+                exit 1
+              fi
+              echo "AWS Lambda API is ready: $HEALTH"
               exit 0
             fi
             sleep 10
           done
+          echo "::error::/health never reported revision ${{ github.sha }}"
           exit 1
 
       - name: Run Live Evaluation Gate
