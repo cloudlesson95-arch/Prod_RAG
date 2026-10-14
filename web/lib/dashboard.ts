@@ -18,6 +18,14 @@ export function formatTime(iso: string): string {
   return new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 }
 
+/** A revision as the runs table shows it: a git SHA cut to 7 characters, a Collect Data run as "collect #<run id>". */
+export function formatRevision(revision: string | null): string {
+  if (!revision) return "–";
+  if (/^[0-9a-f]{40}$/.test(revision)) return revision.slice(0, 7);
+  const collect = /^collect-(\d+)$/.exec(revision);
+  return collect ? `collect #${collect[1]}` : revision;
+}
+
 /** The newest run of one type (the API lists runs newest first). */
 export function latestRun(runs: EvalRun[], type: EvalRun["run_type"]): EvalRun | undefined {
   return runs.find((run) => run.run_type === type);

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { dayAxis, formatBytes, formatPercent, latestRun, psiStatus, reasonLabel, scorePoints, shareRows, sourceLabel } from "./dashboard";
+import {
+  dayAxis, formatBytes, formatPercent, formatRevision, latestRun, psiStatus, reasonLabel, scorePoints, shareRows, sourceLabel,
+} from "./dashboard";
 import type { EvalRun } from "./types";
 
 function run(ts: string, run_type: EvalRun["run_type"], precision_score: number): EvalRun {
@@ -67,5 +69,11 @@ describe("labels", () => {
     expect([reasonLabel("probe"), reasonLabel("unknown")]).toEqual(["Close chunk overruled a no", "unknown"]);
     expect(psiStatus("significant")).toEqual({ status: "serious", label: "Significant drift" });
     expect(psiStatus(null)).toBeNull();
+  });
+
+  it("shortens SHAs, names Collect Data runs and shows other revisions whole", () => {
+    expect(formatRevision("43ed8a2f0c1b9d8e7a6f5e4d3c2b1a0f9e8d7c6b")).toBe("43ed8a2");
+    expect(formatRevision("collect-18412345678")).toBe("collect #18412345678");
+    expect([formatRevision("v1.0.0"), formatRevision(null)]).toEqual(["v1.0.0", "–"]);
   });
 });

@@ -4,7 +4,7 @@ import { Fragment, useState } from "react";
 import { CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis, type LabelProps } from "recharts";
 
 import StatusBadge from "@/components/dashboard/StatusBadge";
-import { dayAxis, formatTime, scorePoints } from "@/lib/dashboard";
+import { dayAxis, formatRevision, formatTime, scorePoints } from "@/lib/dashboard";
 import type { EvalRun } from "@/lib/types";
 
 const GATE = 80; // live-eval fails a deploy below this precision
@@ -114,7 +114,7 @@ export default function EvalHistory({ runs }: { runs: EvalRun[] }) {
                   <tr className="border-t border-black/10 dark:border-white/15" title={run.target_url}>
                     <td className="py-1.5 pr-3 whitespace-nowrap">{formatTime(run.ts)}</td>
                     <td className="py-1.5 pr-3">{run.run_type === "live" ? "Live" : "Synthetic"}</td>
-                    <td className="py-1.5 pr-3 font-mono text-xs">{run.revision ? run.revision.slice(0, 7) : "–"}</td>
+                    <td className="py-1.5 pr-3 font-mono text-xs" title={run.revision ?? undefined}>{formatRevision(run.revision)}</td>
                     <td className="py-1.5 pr-3 text-right tabular-nums">{run.precision_score.toFixed(0)}%</td>
                     <td className="py-1.5 pr-3 whitespace-nowrap">
                       {run.passed_threshold
