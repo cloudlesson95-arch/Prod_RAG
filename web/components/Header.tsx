@@ -122,7 +122,15 @@ function BackendStatus({ cloud }: { cloud: Cloud }) {
       </span>
     );
   }
-  const { revision, state_version: stateVersion } = status.health;
+  const { revision, state_version: stateVersion, routing_ok: routingOk } = status.health;
+  if (routingOk === false) {
+    return (
+      <span className="flex items-center gap-2" title="The router failed its startup check, so questions to this backend will fail. Its logs say why.">
+        <Dot color="bg-red-500" />
+        Router failing{revision ? ` · ${revision.slice(0, 7)}` : ""}
+      </span>
+    );
+  }
   return (
     <span className="flex items-center gap-2" title={`Snapshot ${stateVersion ?? "local"}`}>
       <Dot color="bg-emerald-500" />

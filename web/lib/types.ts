@@ -1,11 +1,12 @@
 // Response shapes of the RAG API (src/core/api.py and src/monitoring/stats.py)
 
 export interface Health {
-  status: string;
+  status: string; // "ok", or "degraded" when routing_ok is false
   model: string;
   revision: string | null;
   state_version: string | null;
   read_only: boolean;
+  routing_ok: boolean | null; // the startup routing self-test; null when it didn't run (ROUTING_METHOD=llm)
 }
 
 export type RouteReason = "classifier" | "probe" | "version" | "floor" | "no_retrieval" | "llm";
