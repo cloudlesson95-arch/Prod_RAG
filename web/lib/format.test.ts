@@ -40,9 +40,19 @@ describe("formatScore and shortSource", () => {
 });
 
 describe("errorMessage", () => {
-  it("points server errors at the usual cause and passes other details through", () => {
-    expect(errorMessage(new ApiError(500, "Internal server error processing query"))).toContain("rate limit");
+  it("gives server errors a plain message and passes other details through", () => {
+    expect(errorMessage(new ApiError(500, "Internal server error processing query")))
+      .toBe("The backend couldn't answer (500). Try again in a moment.");
     expect(errorMessage(new ApiError(400, "Question cannot be empty"))).toBe("Question cannot be empty");
     expect(errorMessage(new ApiError(0, "Can't reach the backend"))).toBe("Can't reach the backend");
+  });
+
+  it("names the rate limit's wait and an empty answer", () => {
+    expect(errorMessage(new ApiError(503, "The language model's rate limit was reached; try again in 7 s", 7)))
+      .toBe("The language model's free-tier rate limit was reached. Try again in 7 s.");
+    expect(errorMessage(new ApiError(503, "Stats are unavailable right now; try again shortly")))
+      .toBe("The backend couldn't answer (503). Try again in a moment.");
+    expect(errorMessage(new ApiError(502, "The model returned an empty answer; ask again")))
+      .toBe("The model returned an empty answer. Ask again.");
   });
 });

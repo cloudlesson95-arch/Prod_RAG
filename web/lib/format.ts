@@ -47,8 +47,12 @@ export function bestPassage(passages: Passage[]): number {
 /** A message for a failed request that tells the user what to do. */
 export function errorMessage(error: unknown): string {
   if (!(error instanceof ApiError)) return String(error);
+  if (error.status === 503 && error.retryAfter != null) {
+    return `The language model's free-tier rate limit was reached. Try again in ${error.retryAfter} s.`;
+  }
+  if (error.status === 502) return "The model returned an empty answer. Ask again.";
   if (error.status >= 500) {
-    return `The backend couldn't answer (${error.status}). The usual cause is the LLM's free-tier rate limit: try again in a few seconds.`;
+    return `The backend couldn't answer (${error.status}). Try again in a moment.`;
   }
   return error.detail;
 }

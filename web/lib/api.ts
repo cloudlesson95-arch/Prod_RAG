@@ -15,7 +15,7 @@ export const REQUEST_TIMEOUT_MS = 300_000;
 export class ApiError extends Error {
   readonly status: number;
   readonly detail: string;
-  readonly retryAfter: number | null; // seconds, from a 429's Retry-After header
+  readonly retryAfter: number | null; // seconds, from the Retry-After of a 429 (demo uploads) or 503 (the LLM's rate limit)
 
   constructor(status: number, detail: string, retryAfter: number | null = null) {
     super(detail);
