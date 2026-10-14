@@ -20,7 +20,7 @@ export interface Passage {
 export interface QueryResponse {
   question: string;
   answer: string;
-  source: string | null; // "none" when answered without retrieval; null on a cache hit
+  source: string | null; // "none" when answered without retrieval; null on a hit of an answer cached without details
   route_reason: RouteReason | null;
   router_confidence: number | null;
   probe_similarity: number | null;

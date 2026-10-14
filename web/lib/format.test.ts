@@ -10,6 +10,11 @@ describe("routeLabel", () => {
     expect(routeLabel({ cache_hit: false, source: "ingested/batch/github-releases.md" }))
       .toBe("Retrieved from github-releases.md");
   });
+
+  it("keeps the original route on a cache hit with stored details", () => {
+    expect(routeLabel({ cache_hit: true, source: "cat-facts.txt" })).toBe("Semantic cache · Retrieved from cat-facts.txt");
+    expect(routeLabel({ cache_hit: true, source: "none" })).toBe("Semantic cache · General knowledge");
+  });
 });
 
 describe("reasonText", () => {
@@ -17,6 +22,12 @@ describe("reasonText", () => {
     expect(reasonText({ cache_hit: true, route_reason: null })).toContain("answered before");
     expect(reasonText({ cache_hit: false, route_reason: "probe" })).toContain("close enough");
     expect(reasonText({ cache_hit: false, route_reason: null })).toBe("");
+  });
+
+  it("adds the original reason to a cache hit", () => {
+    expect(reasonText({ cache_hit: true, route_reason: "classifier" })).toBe(
+      "A very similar question was answered before; this is the stored answer. " +
+      "How it was routed then: The classifier judged this a question about the documents.");
   });
 });
 

@@ -13,13 +13,10 @@ export default function AnswerDetails({ response, cloud, seconds }: {
         <span className="rounded-full border border-black/15 px-2 py-0.5 font-medium dark:border-white/20" title={response.source ?? ""}>
           {routeLabel(response)}
         </span>
-        {!response.cache_hit && (
-          <>
-            <Metric label="router confidence" value={response.router_confidence} />
-            <Metric label="closest chunk" value={response.probe_similarity} />
-            <Metric label="answer-context similarity" value={response.groundedness_score} />
-          </>
-        )}
+        {/* On a cache hit these are the stored answer's own numbers (absent for entries cached without them) */}
+        <Metric label="router confidence" value={response.router_confidence} />
+        <Metric label="closest chunk" value={response.probe_similarity} />
+        <Metric label="answer-context similarity" value={response.groundedness_score} />
         <span className="opacity-70">
           {cloud} · {seconds.toFixed(1)} s
         </span>
